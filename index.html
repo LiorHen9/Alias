@@ -264,6 +264,7 @@ async function wake(on){
 }
 window.addEventListener("pagehide", () => { if(T && S.screen === "turn") save(); });
 document.addEventListener("visibilitychange", () => {
+  if(!S) return;
   if(document.hidden){ if(S.screen==="turn" && T && !T.paused){ T.paused = true; render(); } }
   else if(!["setup","settings","winner","resume"].includes(S.screen)) wake(true);
 });

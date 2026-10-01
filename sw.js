@@ -1,5 +1,5 @@
 // Bump VERSION whenever you upload a new index.html so players get the update.
-const VERSION = "alias-v3";
+const VERSION = "alias-v4";
 const CORE = ["./", "./index.html", "./manifest.webmanifest",
   "./icons/icon-192.png", "./icons/icon-512.png", "./icons/apple-touch-icon.png", "./icons/favicon.png",
   "./words/kids.txt", "./words/easy.txt", "./words/medium.txt", "./words/hard.txt"];
@@ -9,7 +9,7 @@ self.addEventListener("install", e => {
 });
 self.addEventListener("activate", e => {
   e.waitUntil(caches.keys()
-    .then(keys => Promise.all(keys.filter(k => k !== VERSION && k !== "alias-fonts").map(k => caches.delete(k))))
+    .then(keys => Promise.all(keys.filter(k => k.startsWith("alias-v") && k !== VERSION).map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 self.addEventListener("fetch", e => {
