@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>אליאס</title>
+<meta name="theme-color" content="#1B2250">
+<meta name="description" content="משחק אליאס למשפחה ולחברים, על טלפון אחד שעובר מיד ליד">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/favicon.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="אליאס">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&family=Secular+One&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#EAF0FF; --surface:#FFFFFF; --text:#1B2250; --muted:#5A6290; --soft:#D3DCFA;
+  --edge:#1B2250; --sun:#FFC93C; --tomato:#FF5D4A; --mint:#1FAE8F;
+  --sel-bg:#1B2250; --sel-fg:#FFFFFF;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#12173A; --surface:#1E2656; --text:#F3F5FF; --muted:#AEB6E0; --soft:#303A7A;
+    --edge:#FFC93C; --sel-bg:#FFC93C; --sel-fg:#1B2250;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12173A; --surface:#1E2656; --text:#F3F5FF; --muted:#AEB6E0; --soft:#303A7A;
+  --edge:#FFC93C; --sel-bg:#FFC93C; --sel-fg:#1B2250;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font-family:Rubik,"Segoe UI",Arial,sans-serif;font-size:17px;line-height:1.45;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--tomato);outline-offset:2px}
+.display{font-family:"Secular One",Rubik,Arial,sans-serif;font-weight:400}
+
+#app{height:100%;max-width:520px;margin:0 auto;display:flex;flex-direction:column}
+.screen{flex:1;display:flex;flex-direction:column;min-height:0}
+.scroll{flex:1;overflow-y:auto;padding:22px 18px 12px}
+.footer{padding:10px 18px 16px;display:flex;flex-direction:column;gap:10px}
+
+/* buttons */
+.btn{display:block;width:100%;font-family:"Secular One",Rubik,Arial,sans-serif;font-size:21px;border:3px solid var(--edge);border-radius:16px;padding:14px 18px;background:var(--sun);color:#1B2250;box-shadow:4px 4px 0 var(--edge);transition:transform .06s,box-shadow .06s}
+.btn:active{transform:translate(3px,3px);box-shadow:1px 1px 0 var(--edge)}
+.btn:disabled{opacity:.45}
+.btn.green{background:var(--mint);color:#fff}
+.btn.red{background:var(--tomato);color:#fff}
+.btn.plain{background:var(--surface);color:var(--text)}
+.link{background:none;border:0;color:var(--muted);text-decoration:underline;padding:8px;font-size:16px;align-self:center}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
+.back{background:none;border:0;font-size:17px;color:var(--muted);padding:6px 0}
+
+/* home header */
+.hero{display:flex;align-items:center;gap:14px;margin:4px 0 20px}
+.logo{width:62px;height:80px;flex:none;border:3px solid var(--edge);border-radius:12px;background:var(--sun);box-shadow:4px 4px 0 var(--edge);transform:rotate(-7deg);display:grid;place-items:center;font-family:"Secular One",Arial,sans-serif;font-size:34px;color:#1B2250}
+.hero h1{margin:0;font-size:44px;line-height:1}
+.hero p{margin:4px 0 0;color:var(--muted)}
+h2{font-family:"Secular One",Rubik,Arial,sans-serif;font-weight:400;font-size:24px;margin:0 0 12px}
+
+/* pairs */
+.pair{background:var(--surface);border:2px solid var(--soft);border-radius:18px;padding:14px;margin-bottom:14px}
+.pair.kid{border-color:var(--sun)}
+.pair-head{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+.pair-head .num{font-family:"Secular One",Arial,sans-serif;font-size:20px;flex:none}
+.del{flex:none;width:40px;height:40px;border-radius:12px;border:2px solid var(--soft);background:none;font-size:18px;color:var(--muted)}
+input[type=text]{width:100%;min-width:0;padding:11px 12px;border:2px solid var(--soft);border-radius:12px;background:var(--bg);font-size:17px}
+input[type=text]:focus{border-color:var(--edge);outline:none}
+.player{display:flex;gap:8px;margin-top:8px}
+.chip{flex:none;border:2px solid var(--soft);border-radius:999px;background:none;padding:0 14px;font-size:16px;white-space:nowrap}
+.chip[aria-pressed=true]{background:var(--sun);border-color:var(--edge);color:#1B2250;font-weight:500}
+.tag{display:inline-block;margin-top:10px;font-size:14px;color:var(--muted)}
+.add{width:100%;border:2px dashed var(--muted);background:none;border-radius:18px;padding:14px;font-size:18px;color:var(--muted)}
+
+.install{display:flex;align-items:center;gap:12px;width:100%;background:var(--surface);border:2px dashed var(--muted);border-radius:16px;padding:12px 14px;margin:6px 0 16px;text-align:right;font-size:16px}
+.install b{display:block}
+.install small{color:var(--muted);font-size:14px}
+.install .ico{font-size:26px;flex:none}
+/* settings */
+.group{margin-bottom:22px}
+.group .label{font-weight:500;margin-bottom:8px;display:block}
+.group .hint{font-size:14px;color:var(--muted);margin:6px 0 0}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button{flex:1;min-width:58px;padding:12px 4px;border:2px solid var(--soft);border-radius:12px;background:var(--surface);font-size:17px;font-weight:500}
+.seg button[aria-pressed=true]{background:var(--sel-bg);color:var(--sel-fg);border-color:var(--sel-bg)}
+.stepper{display:flex;align-items:center;gap:14px}
+.stepper button{width:52px;height:52px;border-radius:14px;border:2px solid var(--soft);background:var(--surface);font-size:26px}
+.stepper output{font-family:"Secular One",Arial,sans-serif;font-size:30px;min-width:60px;text-align:center}
+.switch-row{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--surface);border-radius:14px;padding:12px 14px;margin-bottom:10px}
+.switch-row small{display:block;color:var(--muted);font-size:14px}
+.switch{flex:none;width:58px;height:34px;border-radius:999px;border:0;background:var(--soft);position:relative}
+.switch::after{content:"";position:absolute;top:4px;right:4px;width:26px;height:26px;border-radius:50%;background:#fff;transition:right .15s}
+.switch[aria-checked=true]{background:var(--mint)}
+.switch[aria-checked=true]::after{right:28px}
+
+/* handoff */
+.center{display:flex;flex-direction:column;align-items:center;text-align:center}
+.round{color:var(--muted);font-size:15px;margin-bottom:6px}
+.turn-of{font-size:40px;line-height:1.1;margin:0 0 16px}
+.roles{display:flex;gap:8px;width:100%;margin-bottom:14px;align-items:stretch}
+.swap{flex:none;width:64px;border:2px solid var(--edge);border-radius:16px;background:var(--sun);color:#1B2250;font-size:26px;line-height:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;box-shadow:3px 3px 0 var(--edge)}
+.swap small{font-size:12px;font-weight:500}
+.swap:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--edge)}
+.role{flex:1;background:var(--surface);border-radius:16px;padding:12px 8px}
+.role small{display:block;color:var(--muted);font-size:14px}
+.role b{font-size:22px;font-family:"Secular One",Arial,sans-serif;font-weight:400}
+.notice{background:var(--sun);color:#1B2250;border-radius:12px;padding:10px 14px;font-weight:500;margin-bottom:14px;width:100%}
+.deck-tag{color:var(--muted);margin-bottom:18px}
+.board{list-style:none;padding:0;margin:0;width:100%}
+.board li{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border-radius:14px;margin-bottom:8px;text-align:right}
+.board li.now{outline:3px solid var(--edge)}
+.board .who{flex:1;min-width:0}
+.board .who small{display:block;color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.board .pts{font-family:"Secular One",Arial,sans-serif;font-size:26px}
+.board-title{display:flex;justify-content:space-between;width:100%;color:var(--muted);font-size:15px;margin:8px 0}
+
+/* turn */
+.turn{padding:14px 18px 0}
+.turn-top{display:flex;align-items:center;gap:12px}
+.secs{font-family:"Secular One",Arial,sans-serif;font-size:38px;min-width:58px;line-height:1}
+.timer{flex:1;height:16px;background:var(--soft);border-radius:999px;overflow:hidden}
+.timer i{display:block;height:100%;width:100%;background:var(--mint);border-radius:999px}
+.timer.warn i{background:var(--sun)}
+.timer.danger i{background:var(--tomato)}
+.pause{flex:none;width:48px;height:48px;border-radius:14px;border:2px solid var(--soft);background:var(--surface);font-size:20px}
+.turn-meta{display:flex;justify-content:space-between;color:var(--muted);font-size:15px;margin-top:10px}
+.stage{flex:1;display:grid;place-items:center;padding:14px 22px;min-height:0}
+.card{--r:0deg;width:100%;max-width:360px;min-height:250px;background:var(--surface);border:3px solid var(--edge);border-radius:26px;box-shadow:8px 8px 0 var(--edge);padding:26px 18px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;transform:rotate(var(--r));animation:deal .26s ease-out}
+.card .emoji{font-size:120px;line-height:1.1}
+.card .kidword{font-size:38px;font-weight:700;margin-top:10px}
+.card .word{font-family:"Secular One",Rubik,Arial,sans-serif;font-size:44px;line-height:1.15;overflow-wrap:anywhere}
+@keyframes deal{from{opacity:0;transform:translateY(26px) rotate(var(--r)) scale(.94)}to{opacity:1;transform:rotate(var(--r))}}
+.answer{display:flex;gap:12px;padding:10px 18px 18px}
+.answer .btn{padding:22px 10px;font-size:24px}
+.answer .skip{flex:1}
+.answer .ok{flex:1.6}
+.overlay{position:fixed;inset:0;background:rgba(18,23,58,.88);display:flex;align-items:center;justify-content:center;padding:24px;z-index:5}
+.overlay .box{width:100%;max-width:380px;display:flex;flex-direction:column;gap:14px;text-align:center;color:#fff}
+.overlay h2{font-size:36px;margin:0 0 6px;color:#fff}
+
+/* last word */
+.lw-card{margin:6px 0 18px}
+.pick{display:flex;flex-direction:column;gap:10px;width:100%}
+
+/* summary */
+.words{list-style:none;padding:0;margin:0 0 16px}
+.words li button{width:100%;display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--surface);border:2px solid transparent;border-radius:14px;margin-bottom:8px;text-align:right;font-size:19px}
+.words li button .mark{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:18px;color:#fff;background:var(--mint)}
+.words li button.no{color:var(--muted)}
+.words li button.no .mark{background:var(--tomato)}
+.words li button .w{flex:1}
+.empty{color:var(--muted);text-align:center;padding:20px 0}
+.total{display:flex;align-items:baseline;justify-content:center;gap:10px;margin:6px 0 18px}
+.total b{font-family:"Secular One",Arial,sans-serif;font-size:56px;line-height:1}
+.lw-row{background:var(--surface);border-radius:14px;padding:12px 14px;margin-bottom:16px;font-size:16px}
+
+/* winner */
+.trophy{font-size:96px;line-height:1;margin:10px 0}
+.confetti{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:4}
+.confetti span{position:absolute;top:-40px;font-size:26px;animation:fall linear forwards}
+@keyframes fall{to{transform:translateY(110vh) rotate(540deg)}}
+
+@media (prefers-reduced-motion: reduce){
+  .card,.confetti span{animation:none}
+  .confetti{display:none}
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+/* ---------- word banks ---------- */
+const KIDS = [["🐘","פִּיל"],["🐶","כֶּלֶב"],["🐱","חָתוּל"],["🐟","דָּג"],["🐦","צִפּוֹר"],["🐄","פָּרָה"],["🐴","סוּס"],["🦁","אַרְיֵה"],["🐒","קוֹף"],["🐢","צָב"],["🐍","נָחָשׁ"],["🦒","גִ'ירָפָה"],["🐰","אַרְנָב"],["🐸","צְפַרְדֵּעַ"],["🦋","פַּרְפַּר"],["🐝","דְּבוֹרָה"],["🐑","כִּבְשָׂה"],["🦆","בַּרְוָז"],["🐧","פִּינְגְּוִין"],["🐻","דֹּב"],["🐔","תַּרְנְגֹלֶת"],["🦈","כָּרִישׁ"],["🐌","חִלָּזוֹן"],["🐭","עַכְבָּר"],["🍎","תַּפּוּחַ"],["🍌","בָּנָנָה"],["🍉","אֲבַטִּיחַ"],["🍇","עֲנָבִים"],["🍓","תּוּת"],["🥕","גֶּזֶר"],["🍕","פִּיצָה"],["🍦","גְּלִידָה"],["🎂","עוּגָה"],["🥚","בֵּיצָה"],["🍞","לֶחֶם"],["🧀","גְּבִינָה"],["🍫","שׁוֹקוֹלָד"],["🥛","חָלָב"],["🍭","סֻכָּרִיָּה"],["🌽","תִּירָס"],["🍋","לִימוֹן"],["🥒","מְלָפְפוֹן"],["🍅","עַגְבָנִיָּה"],["🚗","מְכוֹנִית"],["🚌","אוֹטוֹבּוּס"],["✈️","מָטוֹס"],["🚲","אוֹפַנַּיִם"],["🚂","רַכֶּבֶת"],["⛵","סִירָה"],["🚁","מַסּוֹק"],["🚀","טִיל"],["🚒","כַּבָּאִית"],["🚑","אַמְבּוּלַנְס"],["☀️","שֶׁמֶשׁ"],["🌙","יָרֵחַ"],["⭐","כּוֹכָב"],["🌧️","גֶּשֶׁם"],["🌈","קֶשֶׁת"],["🌳","עֵץ"],["🌸","פֶּרַח"],["⛄","אִישׁ שֶׁלֶג"],["🔥","אֵשׁ"],["🌊","גַּל"],["⚽","כַּדּוּר"],["🎈","בָּלוֹן"],["🧸","דֻּבִּי"],["🪁","עֲפִיפוֹן"],["🎁","מַתָּנָה"],["🥁","תֹּף"],["🎸","גִּיטָרָה"],["🛏️","מִטָּה"],["🪑","כִּסֵּא"],["🚪","דֶּלֶת"],["🔑","מַפְתֵּחַ"],["☂️","מִטְרִיָּה"],["👓","מִשְׁקָפַיִם"],["👟","נַעַל"],["🧦","גֶּרֶב"],["👑","כֶּתֶר"],["🎩","כּוֹבַע"],["🪥","מִבְרֶשֶׁת שִׁנַּיִם"],["✂️","מִסְפָּרַיִם"],["📖","סֵפֶר"],["✏️","עִפָּרוֹן"],["⏰","שָׁעוֹן מְעוֹרֵר"],["📱","טֶלֶפוֹן"],["🏠","בַּיִת"],["🏰","טִירָה"],["👨‍🚒","כַּבַּאי"],["👮","שׁוֹטֵר"],["👩‍⚕️","רוֹפְאָה"],["👨‍🍳","טַבָּח"],["🤡","לֵיצָן"],["👸","נְסִיכָה"],["👻","רוּחַ רְפָאִים"],["🐉","דְּרָקוֹן"],["🦖","דִּינוֹזָאוּר"],["🎃","דְּלַעַת"],["🏖️","חוֹף יָם"],["🦷","שֵׁן"],["👂","אֹזֶן"],["👃","אַף"],["✋","יָד"],["🦶","רֶגֶל"]];
+
+const EASY = "מקרר|רופא שיניים|מכונת כביסה|שלט רחוק|חתונה|יום הולדת|סופרמרקט|בית ספר|מורה|כדורגל|בריכה|מסעדה|פלאפל|חומוס|קפה|עוגייה|מזגן|מחשב|מצלמה|מעלית|מדרגות|רמזור|מונית|שדה תעופה|מזוודה|דרכון|מלון|אוהל|חוף ים|שלג|ענן|ברק|הר|נהר|מדבר|יער|גינה|נמר|קוף|כרית|שמיכה|ספה|טלוויזיה|מראה|מגבת|סבון|מקלחת|משקפיים|שעון|נעלי ספורט|כובע|מעיל|צעיף|ארנק|מפתח|בנק|ספרייה|בית חולים|תחנת דלק|גן חיות|קולנוע|פופקורן|גלידה|פיצה|המבורגר|סלט|מרק|חביתה|שניצל|במבה|ארטיק|שבת|חנוכה|פסח|סוכה|ליצן|זמר|שוטר|כבאי|טבח|נהג אוטובוס|חייל|צייר|תינוק|סבתא|שכן|מספריים|עיפרון|מחברת|תיק גב|אופניים|מטוס|רכבת|סירה|כוס|צלחת|מזלג|סיר|מחבת|שוקו|ביצה|תפוז|אבטיח|בננה|ענבים".split("|");
+
+const MEDIUM = "ביורוקרטיה|גשר תלוי|מדורה|רכבת הרים|מגדלור|צוללת|מפל|הר געש|אי בודד|מערה|מצפן|משקפת|טלסקופ|מיקרוסקופ|רחפן|רובוט|לוויין|אסטרונאוט|דינוזאור|פירמידה|אולימפיאדה|מרתון|שופט|עורך דין|אדריכל|עיתונאי|קוסם|מלצר|מספרה|מנתח|וטרינר|דייג|נגר|חשמלאי|אינסטלטור|במאי|תזמורת|מנצח|קריוקי|תקליט|פודקאסט|סלפי|סיסמה|מחשבון|אקווריום|שעון חול|נדנדה|טרמפולינה|משחק קופסה|שחמט|פאזל|חפיסת קלפים|הפתעה|ראיון עבודה|טיול שנתי|מילואים|בגרות|שכר דירה|משכנתא|ארנונה|פקק תנועה|דוח חניה|רכב חשמלי|קניון|שוק|קופון|תור|ג'ט לג|חיסון|צילום רנטגן|סושי|שקשוקה|ג'חנון|מלוואח|סביח|קוסקוס|חלה|בורקס|סופגנייה|שווארמה|מנגל|פיקניק|שמרטף|גן ילדים|אספת הורים|מסיבת הפתעה|חתן|כלה|ירח דבש|שעון מעורר|מכונת קפה|מדיח כלים|שואב אבק|מקדחה|פנס|מטען|אוזניות|מקרן|מדפסת|גרפיטי|פסל|מוזיאון|טירה|מלכה|פיראט|מפת אוצר|נינג'ה|ערפד|חייזר|תשבץ".split("|");
+
+const HARD = "נוסטלגיה|פרדוקס|לשבור את הקרח|אירוניה|דז'ה וו|אינפלציה|דמוקרטיה|פילוסופיה|אבולוציה|כוח המשיכה|פוטוסינתזה|קנאה|דחיינות|אינטואיציה|הומור שחור|אפקט הפרפר|קונספירציה|פרפקציוניזם|אופטימיות|סבלנות|אחריות|מוטיבציה|השראה|דמיון|חופש|צדק|גלובליזציה|בינה מלאכותית|מטבע קריפטו|סטארט-אפ|אקזיט|מיתוס|אוטופיה|מסורת|אגדה אורבנית|סטנדאפ|גורד שחקים|ארכיאולוג|גאון|מטאפורה|סאטירה|קלישאה|פולקלור|ספונטניות|חוצפה|פרייר|דוגרי|ישראבלוף|כמו פיל בחנות חרסינה|לטמון את הראש בחול|חתול בשק|לקום על צד שמאל|על קצה המזלג|אין עשן בלי אש|מים שקטים חודרים עמוק|בין הפטיש לסדן|לשפוך את התינוק עם המים|הכסף לא גדל על העצים|לגלגל עיניים|לעשות סלט|זמן איכות|פומו|שחיקה|ריאליטי|ויראלי|אלגוריתם|סימולציה|אשליה אופטית|שעון ביולוגי|אפקט פלצבו|אנרגיה סולארית|שינוי אקלים|מלחמה קרה|רנסנס|מהפכה תעשייתית|אירוויזיון|יום כיפור|ל\"ג בעומר|מכונת זמן|חור שחור|גלקסיה|אנטיביוטיקה|גנטיקה".split("|");
+
+const uniq = a => [...new Set(a)];
+const DECKS = {
+  kids: KIDS.map(([e,w]) => ({e, w})),
+  easy: uniq(EASY).map(w => ({w})),
+  medium: uniq(MEDIUM).map(w => ({w})),
+  hard: uniq(HARD).map(w => ({w}))
+};
+const LEVEL_NAMES = {easy:"קל", medium:"בינוני", hard:"קשה", mixed:"מעורב"};
+
+/* ---------- state ---------- */
+const KEY = "alias-game-v1";
+const $app = document.getElementById("app");
+let S, T = null;
+
+function newPair(){ return {id:Math.random().toString(36).slice(2,9), name:"", players:[{name:"",kid:false},{name:"",kid:false}], score:0, next:0}; }
+function freshState(){
+  return {screen:"setup", pairs:[newPair(), newPair()],
+    settings:{time:60, target:30, skipPenalty:true, difficulty:"mixed", lastWord:true, sound:true},
+    turn:0, round:1, used:{kids:[],easy:[],medium:[],hard:[]}, winner:null};
+}
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
+function load(){ try{ const v = localStorage.getItem(KEY); return v ? JSON.parse(v) : null; }catch(e){ return null; } }
+
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pairName = (p,i) => p.name.trim() || `זוג ${i+1}`;
+const playerName = (p,j) => p.players[j].name.trim() || (j ? "שחקן/ית ב׳" : "שחקן/ית א׳");
+const isKidPair = p => p.players.some(x => x.kid);
+const hasAdultPair = () => S.pairs.some(p => !isKidPair(p));
+
+function draw(p){
+  let key = isKidPair(p) ? "kids" : S.settings.difficulty;
+  if(key === "mixed") key = ["easy","medium","hard"][Math.floor(Math.random()*3)];
+  const used = new Set(S.used[key]);
+  let pool = DECKS[key].filter(c => !used.has(c.w));
+  if(!pool.length){ S.used[key] = []; pool = DECKS[key]; }
+  const c = pool[Math.floor(Math.random()*pool.length)];
+  S.used[key].push(c.w);
+  return {...c, r:(Math.random()*6-3).toFixed(1)};
+}
+
+/* ---------- sound, vibration, screen ---------- */
+let AC = null, WL = null;
+function ensureAudio(){ try{ if(!AC) AC = new (window.AudioContext||window.webkitAudioContext)(); if(AC.state==="suspended") AC.resume(); }catch(e){} }
+function beep(freq, dur){
+  if(!S.settings.sound || !AC) return;
+  try{
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = "square"; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.07, AC.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime + dur);
+    o.connect(g); g.connect(AC.destination); o.start(); o.stop(AC.currentTime + dur);
+  }catch(e){}
+}
+function buzz(ms){ try{ navigator.vibrate && navigator.vibrate(ms); }catch(e){} }
+async function wake(on){
+  try{
+    if(on && "wakeLock" in navigator && !WL){ WL = await navigator.wakeLock.request("screen"); WL.addEventListener("release", () => { WL = null; }); }
+    else if(!on && WL){ await WL.release(); WL = null; }
+  }catch(e){}
+}
+document.addEventListener("visibilitychange", () => {
+  if(document.hidden){ if(S.screen==="turn" && T && !T.paused){ T.paused = true; render(); } }
+  else if(!["setup","settings","winner","resume"].includes(S.screen)) wake(true);
+});
+
+/* ---------- screens ---------- */
+function vSetup(){
+  const pairs = S.pairs.map((p,i) => `
+    <div class="pair ${isKidPair(p)?"kid":""}">
+      <div class="pair-head">
+        <span class="num">${i+1}</span>
+        <input type="text" data-in="pname" data-i="${i}" value="${esc(p.name)}" placeholder="שם הזוג (לא חובה)" maxlength="24">
+        ${S.pairs.length > 2 ? `<button class="del" data-a="delPair" data-i="${i}" aria-label="מחיקת זוג ${i+1}">✕</button>` : ""}
+      </div>
+      ${[0,1].map(j => `
+        <div class="player">
+          <input type="text" data-in="player" data-i="${i}" data-j="${j}" value="${esc(p.players[j].name)}" placeholder="${j ? "שחקן/ית 2" : "שחקן/ית 1"}" maxlength="20">
+          <button class="chip" data-a="kid" data-i="${i}" data-j="${j}" aria-pressed="${p.players[j].kid}">ילד/ה 🧒</button>
+        </div>`).join("")}
+      <span class="tag">${isKidPair(p) ? "🧸 הזוג הזה יקבל כרטיסי תמונות" : "📝 כרטיסי מילים"}</span>
+    </div>`).join("");
+  return `<div class="screen">
+    <div class="scroll">
+      <div class="hero"><div class="logo" aria-hidden="true">א</div>
+        <div><h1 class="display">אליאס</h1><p>מסבירים בלי להגיד את המילה</p></div></div>
+      ${installBanner()}
+      <h2>מי משחק?</h2>
+      ${pairs}
+      <button class="add" data-a="addPair">+ הוספת זוג</button>
+    </div>
+    <div class="footer"><button class="btn" data-a="toSettings">המשך להגדרות</button></div>
+  </div>`;
+}
+
+function seg(name, opts, val){
+  return `<div class="seg">${opts.map(([v,l]) => `<button data-a="set" data-k="${name}" data-v="${v}" aria-pressed="${String(val)===String(v)}">${l}</button>`).join("")}</div>`;
+}
+function sw(name, title, sub){
+  const on = S.settings[name];
+  return `<div class="switch-row"><div>${title}${sub?`<small>${sub}</small>`:""}</div>
+    <button class="switch" role="switch" aria-checked="${on}" aria-label="${title}" data-a="toggle" data-k="${name}"></button></div>`;
+}
+function vSettings(){
+  const s = S.settings;
+  return `<div class="screen">
+    <div class="scroll">
+      <div class="topbar"><button class="back" data-a="go" data-v="setup">→ חזרה לזוגות</button></div>
+      <h2>הגדרות</h2>
+      <div class="group"><span class="label">זמן לכל תור</span>
+        ${seg("time", [[30,"30 ש׳"],[45,"45 ש׳"],[60,"דקה"],[90,"90 ש׳"],[120,"2 דק׳"]], s.time)}</div>
+      <div class="group"><span class="label">ניקוד לניצחון</span>
+        <div class="stepper"><button data-a="target" data-v="5" aria-label="הגדלה">+</button><output>${s.target}</output><button data-a="target" data-v="-5" aria-label="הקטנה">−</button></div></div>
+      ${hasAdultPair() ? `<div class="group"><span class="label">רמת קושי למבוגרים</span>
+        ${seg("difficulty", [["easy","קל"],["medium","בינוני"],["hard","קשה"],["mixed","מעורב"]], s.difficulty)}
+        <p class="hint">${{easy:"מילים יומיומיות שכולם מכירים",medium:"מושגים שדורשים קצת יצירתיות",hard:"מושגים מופשטים וביטויים",mixed:"שילוב אקראי של כל הרמות"}[s.difficulty]}</p></div>` : ""}
+      <div class="group">
+        ${sw("skipPenalty", "דילוג מוריד נקודה")}
+        ${sw("lastWord", "המילה האחרונה", "כשהזמן נגמר, כל מי שבחדר יכול לנחש")}
+        ${sw("sound", "צלילים")}
+      </div>
+    </div>
+    <div class="footer"><button class="btn" data-a="startGame">יאללה, מתחילים!</button></div>
+  </div>`;
+}
+
+function vBoard(highlight){
+  const t = S.settings.target;
+  return `<div class="board-title"><span>ניקוד</span><span>יעד: ${t}</span></div>
+  <ol class="board">${S.pairs.map((p,i) => `<li class="${i===highlight?"now":""}">
+    <div class="who"><b>${esc(pairName(p,i))}</b><small>${esc(playerName(p,0))} ו${esc(playerName(p,1))}</small></div>
+    <span class="pts">${p.score}</span></li>`).join("")}</ol>`;
+}
+
+function vHandoff(){
+  const p = S.pairs[S.turn], e = p.next, g = 1 - p.next;
+  const max = Math.max(...S.pairs.map(x => x.score));
+  const leaders = S.pairs.filter(x => x.score === max).length;
+  let notice = "";
+  if(max >= S.settings.target) notice = leaders > 1 && S.turn === 0 ? "שוויון בצמרת! ממשיכים לסבב נוסף" : "מישהו עבר את היעד, זה הסבב האחרון";
+  const deck = isKidPair(p) ? "🧸 כרטיסי תמונות" : `📝 מילים, רמה: ${LEVEL_NAMES[S.settings.difficulty]}`;
+  return `<div class="screen">
+    <div class="scroll center">
+      <div class="round">סבב ${S.round}</div>
+      <h1 class="display turn-of">התור של ${esc(pairName(p,S.turn))}</h1>
+      ${notice ? `<div class="notice">${notice}</div>` : ""}
+      <div class="roles">
+        <div class="role"><small>מסביר/ה</small><b>${esc(playerName(p,e))}</b></div>
+        <button class="swap" data-a="swap" aria-label="החלפה בין המסביר למנחש">⇄<small>החלפה</small></button>
+        <div class="role"><small>מנחש/ת</small><b>${esc(playerName(p,g))}</b></div>
+      </div>
+      <div class="deck-tag">${deck}</div>
+      ${vBoard(S.turn)}
+    </div>
+    <div class="footer">
+      <button class="btn" data-a="startTurn">${esc(playerName(p,e))} מחזיק/ה את הטלפון, מוכנים!</button>
+      <button class="link" data-a="quit">סיום משחק</button>
+    </div>
+  </div>`;
+}
+
+function cardHTML(c){
+  return c.e
+    ? `<div class="card" style="--r:${c.r}deg"><div class="emoji" aria-hidden="true">${c.e}</div><div class="kidword">${esc(c.w)}</div></div>`
+    : `<div class="card" style="--r:${c.r}deg"><div class="word">${esc(c.w)}</div></div>`;
+}
+function timerState(){
+  const secs = Math.max(0, Math.ceil(T.left/1000));
+  const pct = Math.max(0, T.left / T.total * 100);
+  const cls = secs <= 5 ? "danger" : secs <= 15 ? "warn" : "";
+  return {secs, pct, cls};
+}
+function vTurn(){
+  const p = S.pairs[S.turn], ts = timerState();
+  const ok = T.words.filter(w => w.ok).length, sk = T.words.length - ok;
+  return `<div class="screen">
+    <div class="turn">
+      <div class="turn-top">
+        <span class="secs" id="secs">${ts.secs}</span>
+        <div class="timer ${ts.cls}" id="timer"><i id="bar" style="width:${ts.pct}%"></i></div>
+        <button class="pause" data-a="pause" aria-label="השהיה">⏸</button>
+      </div>
+      <div class="turn-meta"><span>${esc(playerName(p,p.next))} מסביר/ה</span><span>✅ ${ok} &nbsp; ⏭ ${sk}</span></div>
+    </div>
+    <div class="stage" id="stage">${cardHTML(T.card)}</div>
+    <div class="answer">
+      <button class="btn red skip" data-a="answer" data-v="0">דלג</button>
+      <button class="btn green ok" data-a="answer" data-v="1">✅ ניחשו!</button>
+    </div>
+    ${T.paused ? `<div class="overlay"><div class="box">
+      <h2 class="display">מושהה</h2>
+      <button class="btn" data-a="resume">המשך</button>
+      <button class="btn plain" data-a="endTurn">סיום התור עכשיו</button>
+    </div></div>` : ""}
+  </div>`;
+}
+
+function vLastWord(){
+  return `<div class="screen">
+    <div class="scroll center">
+      <h1 class="display turn-of">הזמן נגמר!</h1>
+      <p style="margin:0 0 10px">המילה האחרונה פתוחה לכולם. מי ניחש ראשון?</p>
+      <div class="stage lw-card" style="width:100%;padding:0">${cardHTML(T.card)}</div>
+      <div class="pick">
+        ${S.pairs.map((p,i) => `<button class="btn plain" data-a="lastWord" data-v="${i}">${esc(pairName(p,i))}</button>`).join("")}
+        <button class="link" data-a="lastWord" data-v="-1">אף אחד לא ניחש</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function turnPoints(){
+  const ok = T.words.filter(w => w.ok).length, sk = T.words.length - ok;
+  return ok - (S.settings.skipPenalty ? sk : 0);
+}
+function vSummary(){
+  const p = S.pairs[S.turn], pts = turnPoints();
+  const lw = T.lastPair != null && T.lastPair >= 0;
+  return `<div class="screen">
+    <div class="scroll">
+      <h2>סיכום התור של ${esc(pairName(p,S.turn))}</h2>
+      <p style="margin:-4px 0 12px;color:var(--muted);font-size:15px">נלחץ משהו בטעות? אפשר ללחוץ על מילה כדי לתקן.</p>
+      ${T.words.length ? `<ul class="words">${T.words.map((w,i) => `<li><button class="${w.ok?"":"no"}" data-a="flip" data-i="${i}" aria-pressed="${w.ok}">
+          <span class="mark">${w.ok?"✓":"✕"}</span><span class="w">${w.e?w.e+" ":""}${esc(w.w)}</span></button></li>`).join("")}</ul>`
+        : `<p class="empty">לא נענו מילים בתור הזה</p>`}
+      ${lw ? `<div class="lw-row">המילה האחרונה (${esc(T.card.w)}): +1 ל${esc(pairName(S.pairs[T.lastPair],T.lastPair))}</div>` : ""}
+      <div class="total"><span>נקודות בתור:</span><b>${pts > 0 ? "+" : ""}${pts}</b></div>
+    </div>
+    <div class="footer"><button class="btn" data-a="applyTurn">אישור והמשך</button></div>
+  </div>`;
+}
+
+function vWinner(){
+  const i = S.winner, p = S.pairs[i];
+  const sorted = S.pairs.map((x,k) => [x,k]).sort((a,b) => b[0].score - a[0].score);
+  return `<div class="screen">
+    <div class="confetti" id="confetti"></div>
+    <div class="scroll center">
+      <div class="trophy" aria-hidden="true">🏆</div>
+      <h1 class="display turn-of">${esc(pairName(p,i))} ניצחו!</h1>
+      <p style="margin:-8px 0 18px;color:var(--muted)">${esc(playerName(p,0))} ו${esc(playerName(p,1))}, ${p.score} נקודות</p>
+      <ol class="board">${sorted.map(([x,k],n) => `<li class="${k===i?"now":""}"><span>${["🥇","🥈","🥉"][n]||"🎈"}</span>
+        <div class="who"><b>${esc(pairName(x,k))}</b></div><span class="pts">${x.score}</span></li>`).join("")}</ol>
+    </div>
+    <div class="footer">
+      <button class="btn" data-a="rematch">משחק חוזר עם אותם זוגות</button>
+      <button class="btn plain" data-a="newGame">זוגות חדשים</button>
+    </div>
+  </div>`;
+}
+
+function vResume(){
+  return `<div class="screen">
+    <div class="scroll center" style="justify-content:center">
+      <div class="logo" aria-hidden="true" style="margin-bottom:22px">א</div>
+      <h1 class="display turn-of">יש משחק שמור</h1>
+      <p style="margin:0 0 20px;color:var(--muted)">סבב ${S.round}, התור של ${esc(pairName(S.pairs[S.turn],S.turn))}</p>
+      ${vBoard(-1)}
+    </div>
+    <div class="footer">
+      <button class="btn" data-a="go" data-v="handoff">המשך את המשחק</button>
+      <button class="btn plain" data-a="newGame">משחק חדש</button>
+    </div>
+  </div>`;
+}
+
+const VIEWS = {setup:vSetup, settings:vSettings, handoff:vHandoff, turn:vTurn, lastword:vLastWord, summary:vSummary, winner:vWinner, resume:vResume};
+function render(){
+  $app.innerHTML = VIEWS[S.screen]();
+  if(!["turn","lastword","summary"].includes(S.screen)) save();
+  else { const snap = S.screen; S.screen = "handoff"; save(); S.screen = snap; }
+  if(S.screen === "winner") confetti();
+}
+
+/* ---------- timer ---------- */
+function updateTimer(){
+  const ts = timerState();
+  const secs = document.getElementById("secs"), bar = document.getElementById("bar"), tm = document.getElementById("timer");
+  if(!secs) return;
+  secs.textContent = ts.secs; bar.style.width = ts.pct + "%"; tm.className = "timer " + ts.cls;
+}
+function tick(){
+  const now = performance.now();
+  if(T.paused){ T.last = now; return; }
+  T.left -= now - T.last; T.last = now;
+  updateTimer();
+  const s = Math.ceil(T.left/1000);
+  if(s <= 5 && s > 0 && s !== T.lastBeep){ T.lastBeep = s; beep(880, 0.08); }
+  if(T.left <= 0){
+    clearInterval(T.iv); beep(220, 0.7); buzz([300,100,300]);
+    S.screen = S.settings.lastWord ? "lastword" : "summary";
+    render();
+  }
+}
+
+/* ---------- actions ---------- */
+const A = {
+  addPair(){ S.pairs.push(newPair()); render(); const inputs = $app.querySelectorAll('input[data-in="pname"]'); inputs[inputs.length-1]?.scrollIntoView({behavior:"smooth",block:"center"}); },
+  delPair(el){ S.pairs.splice(+el.dataset.i, 1); render(); },
+  kid(el){ const pl = S.pairs[+el.dataset.i].players[+el.dataset.j]; pl.kid = !pl.kid; render(); },
+  toSettings(){ S.screen = "settings"; render(); },
+  go(el){ S.screen = el.dataset.v; render(); if(S.screen==="handoff") wake(true); },
+  set(el){ const k = el.dataset.k, v = el.dataset.v; S.settings[k] = isNaN(+v) ? v : +v; render(); },
+  toggle(el){ const k = el.dataset.k; S.settings[k] = !S.settings[k]; render(); },
+  target(el){ S.settings.target = Math.min(100, Math.max(10, S.settings.target + +el.dataset.v)); render(); },
+  startGame(){
+    ensureAudio();
+    S.pairs.forEach(p => { p.score = 0; p.next = 0; });
+    S.turn = 0; S.round = 1; S.winner = null; S.screen = "handoff";
+    render(); wake(true);
+  },
+  startTurn(){
+    ensureAudio(); wake(true);
+    const p = S.pairs[S.turn], ms = S.settings.time * 1000;
+    T = {words:[], card:draw(p), total:ms, left:ms, last:performance.now(), paused:false, lastPair:null, lastBeep:null};
+    S.screen = "turn"; render();
+    T.iv = setInterval(tick, 100);
+  },
+  answer(el){
+    if(!T || T.paused || T.left <= 0) return;
+    T.words.push({w:T.card.w, e:T.card.e, ok: el.dataset.v === "1"});
+    T.card = draw(S.pairs[S.turn]);
+    render();
+  },
+  swap(){ const p = S.pairs[S.turn]; p.next = 1 - p.next; render(); },
+  pause(){ T.paused = true; render(); },
+  resume(){ T.paused = false; T.last = performance.now(); render(); },
+  endTurn(){ clearInterval(T.iv); T.left = 0; S.screen = "summary"; render(); },
+  lastWord(el){ T.lastPair = +el.dataset.v; S.screen = "summary"; render(); },
+  flip(el){ const w = T.words[+el.dataset.i]; w.ok = !w.ok; render(); },
+  applyTurn(){
+    const p = S.pairs[S.turn];
+    p.score += turnPoints();
+    if(T.lastPair != null && T.lastPair >= 0) S.pairs[T.lastPair].score += 1;
+    p.next = 1 - p.next; T = null;
+    S.turn++;
+    if(S.turn >= S.pairs.length){
+      S.turn = 0; S.round++;
+      const max = Math.max(...S.pairs.map(x => x.score));
+      const leaders = S.pairs.map((x,i) => [x,i]).filter(([x]) => x.score === max);
+      if(max >= S.settings.target && leaders.length === 1){ S.winner = leaders[0][1]; S.screen = "winner"; wake(false); render(); return; }
+    }
+    S.screen = "handoff"; render();
+  },
+  quit(){ if(confirm("לסיים את המשחק? הניקוד יימחק, הזוגות יישמרו.")){ S.pairs.forEach(p => { p.score = 0; p.next = 0; }); S.screen = "setup"; wake(false); render(); } },
+  rematch(){ A.startGame(); },
+  async install(){ if(!installEvt) return; installEvt.prompt(); try{ await installEvt.userChoice; }catch(e){} installEvt = null; render(); },
+  hideInstall(){ S.hideInstall = true; render(); },
+  newGame(){ const s = S.settings, u = S.used; S = freshState(); S.settings = s; S.used = u; wake(false); render(); }
+};
+
+$app.addEventListener("click", e => {
+  const el = e.target.closest("[data-a]");
+  if(el && A[el.dataset.a]) A[el.dataset.a](el);
+});
+$app.addEventListener("input", e => {
+  const el = e.target;
+  if(el.dataset.in === "pname") S.pairs[+el.dataset.i].name = el.value;
+  if(el.dataset.in === "player") S.pairs[+el.dataset.i].players[+el.dataset.j].name = el.value;
+  save();
+});
+
+function confetti(){
+  const box = document.getElementById("confetti"); if(!box) return;
+  const bits = ["🎉","🎊","⭐","✨","🎈"];
+  for(let i = 0; i < 36; i++){
+    const s = document.createElement("span");
+    s.textContent = bits[i % bits.length];
+    s.style.left = Math.random()*100 + "%";
+    s.style.animationDuration = (2.4 + Math.random()*2.2) + "s";
+    s.style.animationDelay = (Math.random()*1.2) + "s";
+    box.appendChild(s);
+  }
+}
+
+
+/* ---------- install to home screen ---------- */
+let installEvt = null;
+const standalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+function installBanner(){
+  if(standalone() || S.hideInstall) return "";
+  if(installEvt) return `<button class="install" data-a="install"><span class="ico">📲</span><span><b>התקנה במסך הבית</b><small>פותחים כמו אפליקציה, עובד גם בלי אינטרנט</small></span></button>`;
+  if(isIOS) return `<div class="install"><span class="ico">📲</span><span><b>להוספה למסך הבית</b><small>בספארי: לוחצים על כפתור השיתוף ⬆️ ואז "הוספה למסך הבית"</small></span><button class="del" data-a="hideInstall" aria-label="הסתרה">✕</button></div>`;
+  return "";
+}
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if(S && S.screen === "setup") render(); });
+window.addEventListener("appinstalled", () => { installEvt = null; if(S && S.screen === "setup") render(); });
+if("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")){
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
+
+/* ---------- boot ---------- */
+(function init(){
+  const saved = load();
+  if(saved && saved.pairs && saved.settings){
+    S = Object.assign(freshState(), saved);
+    S.settings = Object.assign(freshState().settings, saved.settings);
+    if(!["setup","settings"].includes(S.screen)) S.screen = S.screen === "winner" ? "setup" : "resume";
+  } else S = freshState();
+  render();
+})();
+</script>
+</body>
+</html>
