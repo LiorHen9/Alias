@@ -143,7 +143,7 @@ input[type=text]:focus{border-color:var(--edge);outline:none}
 .answer .btn{padding:22px 10px;font-size:24px}
 .answer .skip{flex:1}
 .answer .ok{flex:1.6}
-.overlay{position:fixed;inset:0;background:rgba(18,23,58,.88);display:flex;align-items:center;justify-content:center;padding:24px;z-index:5}
+.overlay{position:fixed;inset:0;background:rgba(18,23,58,.97);display:flex;align-items:center;justify-content:center;padding:24px;z-index:5}
 .overlay .box{width:100%;max-width:380px;display:flex;flex-direction:column;gap:14px;text-align:center;color:#fff}
 .overlay h2{font-size:36px;margin:0 0 6px;color:#fff}
 
@@ -207,7 +207,12 @@ function freshState(){
     settings:{time:60, target:30, skipPenalty:true, difficulty:"mixed", lastWord:true, sound:true},
     turn:0, round:1, used:{kids:[],easy:[],medium:[],hard:[]}, winner:null};
 }
-function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
+function save(){
+  try{
+    const turn = T ? {words:T.words, card:T.card, total:T.total, left:Math.max(0,T.left), lastPair:T.lastPair} : null;
+    localStorage.setItem(KEY, JSON.stringify(Object.assign({}, S, {T: turn})));
+  }catch(e){}
+}
 function load(){ try{ const v = localStorage.getItem(KEY); return v ? JSON.parse(v) : null; }catch(e){ return null; } }
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -247,6 +252,7 @@ async function wake(on){
     else if(!on && WL){ await WL.release(); WL = null; }
   }catch(e){}
 }
+window.addEventListener("pagehide", () => { if(T && S.screen === "turn") save(); });
 document.addEventListener("visibilitychange", () => {
   if(document.hidden){ if(S.screen==="turn" && T && !T.paused){ T.paused = true; render(); } }
   else if(!["setup","settings","winner","resume"].includes(S.screen)) wake(true);
@@ -377,6 +383,7 @@ function vTurn(){
     </div>
     ${T.paused ? `<div class="overlay"><div class="box">
       <h2 class="display">מושהה</h2>
+      ${T.restored ? `<p style="margin:-6px 0 4px">התור נשמר. נשארו ${Math.ceil(T.left/1000)} שניות</p>` : ""}
       <button class="btn" data-a="resume">המשך</button>
       <button class="btn plain" data-a="endTurn">סיום התור עכשיו</button>
     </div></div>` : ""}
@@ -455,8 +462,7 @@ function vResume(){
 const VIEWS = {setup:vSetup, settings:vSettings, handoff:vHandoff, turn:vTurn, lastword:vLastWord, summary:vSummary, winner:vWinner, resume:vResume};
 function render(){
   $app.innerHTML = VIEWS[S.screen]();
-  if(!["turn","lastword","summary"].includes(S.screen)) save();
-  else { const snap = S.screen; S.screen = "handoff"; save(); S.screen = snap; }
+  save();
   if(S.screen === "winner") confetti();
 }
 
@@ -472,6 +478,8 @@ function tick(){
   if(T.paused){ T.last = now; return; }
   T.left -= now - T.last; T.last = now;
   updateTimer();
+  const whole = Math.ceil(T.left/1000);
+  if(whole !== T.savedSec){ T.savedSec = whole; save(); }
   const s = Math.ceil(T.left/1000);
   if(s <= 5 && s > 0 && s !== T.lastBeep){ T.lastBeep = s; beep(880, 0.08); }
   if(T.left <= 0){
@@ -512,7 +520,7 @@ const A = {
   },
   swap(){ const p = S.pairs[S.turn]; p.next = 1 - p.next; render(); },
   pause(){ T.paused = true; render(); },
-  resume(){ T.paused = false; T.last = performance.now(); render(); },
+  resume(){ ensureAudio(); wake(true); T.restored = false; T.paused = false; T.last = performance.now(); render(); },
   endTurn(){ clearInterval(T.iv); T.left = 0; S.screen = "summary"; render(); },
   lastWord(el){ T.lastPair = +el.dataset.v; S.screen = "summary"; render(); },
   flip(el){ const w = T.words[+el.dataset.i]; w.ok = !w.ok; render(); },
@@ -582,9 +590,17 @@ if("serviceWorker" in navigator && (location.protocol === "https:" || location.h
 (function init(){
   const saved = load();
   if(saved && saved.pairs && saved.settings){
+    const turn = saved.T; delete saved.T;
     S = Object.assign(freshState(), saved);
     S.settings = Object.assign(freshState().settings, saved.settings);
-    if(!["setup","settings"].includes(S.screen)) S.screen = S.screen === "winner" ? "setup" : "resume";
+    if(turn && ["turn","lastword","summary"].includes(S.screen)){
+      // A turn was in progress: bring it back exactly where it stopped, paused
+      T = Object.assign({}, turn, {paused:true, last:performance.now(), lastBeep:null, restored:true});
+      if(S.screen === "turn"){
+        if(T.left <= 0) S.screen = S.settings.lastWord ? "lastword" : "summary";
+        else T.iv = setInterval(tick, 100);
+      }
+    } else if(!["setup","settings"].includes(S.screen)) S.screen = S.screen === "winner" ? "setup" : "resume";
   } else S = freshState();
   render();
 })();
