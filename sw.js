@@ -1,7 +1,8 @@
 // Bump VERSION whenever you upload a new index.html so players get the update.
-const VERSION = "alias-v2";
+const VERSION = "alias-v3";
 const CORE = ["./", "./index.html", "./manifest.webmanifest",
-  "./icons/icon-192.png", "./icons/icon-512.png", "./icons/apple-touch-icon.png", "./icons/favicon.png"];
+  "./icons/icon-192.png", "./icons/icon-512.png", "./icons/apple-touch-icon.png", "./icons/favicon.png",
+  "./words/kids.txt", "./words/easy.txt", "./words/medium.txt", "./words/hard.txt"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(CORE)).then(() => self.skipWaiting()));
@@ -25,6 +26,15 @@ self.addEventListener("fetch", e => {
     return;
   }
   if (url.origin !== location.origin) return;
+  // Word lists: network first so edits show up right away, cache when offline
+  if (url.pathname.includes("/words/")) {
+    const key = url.origin + url.pathname;
+    e.respondWith(fetch(req).then(r => {
+      if (r.ok) { const copy = r.clone(); caches.open(VERSION).then(c => c.put(key, copy)); }
+      return r;
+    }).catch(() => caches.match(key)));
+    return;
+  }
   // The page: try network first so updates arrive, fall back to cache offline
   if (req.mode === "navigate") {
     e.respondWith(fetch(req).then(r => {
