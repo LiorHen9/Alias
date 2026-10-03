@@ -205,6 +205,9 @@ async function loadWords(){
     if(!DECKS[k].length) throw new Error(k);
   }));
 }
+const LEVEL_OPTS = [["easy","קל"],["medium","בינוני"],["hard","קשה"],["mixed","מעורב"]];
+const LEVEL_HINTS = {easy:"מילים יומיומיות שכולם מכירים",medium:"מושגים שדורשים קצת יצירתיות",hard:"מושגים מופשטים וביטויים",mixed:"שילוב אקראי של כל הרמות"};
+const LEVEL_LABEL = "רמת קושי";
 const LEVEL_NAMES = {easy:"קל", medium:"בינוני", hard:"קשה", mixed:"מעורב"};
 
 /* ---------- state ---------- */
@@ -219,11 +222,11 @@ function freshState(){
     turn:0, round:1, used:{kids:[],easy:[],medium:[],hard:[]}, winner:null};
 }
 function save(){
+  if(!S) return;
   try{
     const turn = T ? {words:T.words, card:T.card, total:T.total, left:Math.max(0,T.left), lastPair:T.lastPair} : null;
     localStorage.setItem(KEY, JSON.stringify(Object.assign({}, S, {T: turn})));
   }catch(e){}
-  if(window.AliasRoom) AliasRoom.publish();
 }
 function load(){ try{ const v = localStorage.getItem(KEY); return v ? JSON.parse(v) : null; }catch(e){ return null; } }
 
@@ -321,8 +324,8 @@ function vSettings(){
       <div class="group"><span class="label">ניקוד לניצחון</span>
         <div class="stepper"><button data-a="target" data-v="5" aria-label="הגדלה">+</button><output>${s.target}</output><button data-a="target" data-v="-5" aria-label="הקטנה">−</button></div></div>
       ${hasAdultPair() ? `<div class="group"><span class="label">רמת קושי למבוגרים</span>
-        ${seg("difficulty", [["easy","קל"],["medium","בינוני"],["hard","קשה"],["mixed","מעורב"]], s.difficulty)}
-        <p class="hint">${{easy:"מילים יומיומיות שכולם מכירים",medium:"מושגים שדורשים קצת יצירתיות",hard:"מושגים מופשטים וביטויים",mixed:"שילוב אקראי של כל הרמות"}[s.difficulty]}</p></div>` : ""}
+        ${seg("difficulty", LEVEL_OPTS, s.difficulty)}
+        <p class="hint">${LEVEL_HINTS[s.difficulty]}</p></div>` : ""}
       <div class="group">
         ${sw("skipPenalty", "דילוג מוריד נקודה")}
         ${sw("lastWord", "המילה האחרונה", "כשהזמן נגמר, כל מי שבחדר יכול לנחש")}
@@ -350,7 +353,6 @@ function vHandoff(){
   const deck = isKidPair(p) ? "🧸 כרטיסי תמונות" : `📝 מילים, רמה: ${LEVEL_NAMES[S.settings.difficulty]}`;
   return `<div class="screen">
     <div class="scroll center">
-      ${roomBtn()}
       <div class="round">סבב ${S.round}</div>
       <h1 class="display turn-of">התור של ${esc(pairName(p,S.turn))}</h1>
       ${notice ? `<div class="notice">${notice}</div>` : ""}
@@ -450,7 +452,6 @@ function vWinner(){
       <div class="trophy" aria-hidden="true">🏆</div>
       <h1 class="display turn-of">${esc(pairName(p,i))} ניצחו!</h1>
       <p style="margin:-8px 0 18px;color:var(--muted)">${esc(playerName(p,0))} ו${esc(playerName(p,1))}, ${p.score} נקודות</p>
-      ${roomBtn()}
       <ol class="board">${sorted.map(([x,k],n) => `<li class="${k===i?"now":""}"><span>${["🥇","🥈","🥉"][n]||"🎈"}</span>
         <div class="who"><b>${esc(pairName(x,k))}</b></div><span class="pts">${x.score}</span></li>`).join("")}</ol>
     </div>
@@ -467,7 +468,6 @@ function vResume(){
       <div class="logo" aria-hidden="true" style="margin-bottom:22px">א</div>
       <h1 class="display turn-of">יש משחק שמור</h1>
       <p style="margin:0 0 20px;color:var(--muted)">סבב ${S.round}, התור של ${esc(pairName(S.pairs[S.turn],S.turn))}</p>
-      ${roomBtn()}
       ${vBoard(-1)}
     </div>
     <div class="footer">
@@ -479,6 +479,7 @@ function vResume(){
 
 const VIEWS = {setup:vSetup, settings:vSettings, handoff:vHandoff, turn:vTurn, lastword:vLastWord, summary:vSummary, winner:vWinner, resume:vResume};
 function render(){
+  if(window.AliasRoom && AliasRoom.active()) return; // משחק בחדר מצייר את המסך בעצמו
   $app.innerHTML = VIEWS[S.screen]();
   save();
   if(S.screen === "winner") confetti();
@@ -605,12 +606,12 @@ if("serviceWorker" in navigator && (location.protocol === "https:" || location.h
 }
 
 /* ---------- game room (room.js) ---------- */
-if(window.AliasRoom) AliasRoom.attach({game:"alias", key:KEY, app:$app, get:() => ({S, T}),
-  pairName, playerName, isKidPair, levelNames:LEVEL_NAMES, turnPoints});
+if(window.AliasRoom) AliasRoom.attach({game:"alias", key:KEY, app:$app, decks:DECKS, hasKids:"kids" in DECKS,
+  levels:LEVEL_OPTS, levelNames:LEVEL_NAMES, levelHints:LEVEL_HINTS, levelLabel:LEVEL_LABEL,
+  settings:() => (S || freshState()).settings, firstPair:() => S && S.pairs[0], confetti});
 
 /* ---------- boot ---------- */
 (async function init(){
-  if(window.AliasRoom && AliasRoom.isViewer()){ AliasRoom.startViewer(); return; }
   try{ await loadWords(); }
   catch(e){
     $app.innerHTML = `<div class="screen"><div class="scroll center" style="justify-content:center">
@@ -619,6 +620,8 @@ if(window.AliasRoom) AliasRoom.attach({game:"alias", key:KEY, app:$app, get:() =
       <div class="footer"><button class="btn" onclick="location.reload()">נסו שוב</button></div></div>`;
     return;
   }
+  // משחק בחדר (לינק עם קוד, או חדר פתוח מהפעם הקודמת)
+  if(window.AliasRoom && AliasRoom.boot()) return;
   const saved = load();
   if(saved && saved.pairs && saved.settings){
     const turn = saved.T; delete saved.T;

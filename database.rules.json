@@ -3,7 +3,7 @@
     "rooms": {
       "$game": {
         "$code": {
-          ".read": true,
+          ".read": "auth != null",
           ".write": "auth != null && data.child('host').val() === auth.uid && !newData.exists()",
           "host": {
             ".write": "auth != null && !data.exists() && newData.val() === auth.uid"
@@ -11,17 +11,16 @@
           "created": {
             ".write": "auth != null && root.child('rooms').child($game).child($code).child('host').val() === auth.uid"
           },
-          "online": {
-            ".write": "auth != null && root.child('rooms').child($game).child($code).child('host').val() === auth.uid"
-          },
-          "state": {
-            ".write": "auth != null && root.child('rooms').child($game).child($code).child('host').val() === auth.uid"
-          },
-          "viewers": {
+          "members": {
             "$uid": {
-              ".write": "auth != null && $uid === auth.uid",
-              ".validate": "newData.isBoolean()"
+              ".write": "auth != null && ($uid === auth.uid || root.child('rooms').child($game).child($code).child('host').val() === auth.uid)"
             }
+          },
+          "game": {
+            ".write": "auth != null && (root.child('rooms').child($game).child($code).child('host').val() === auth.uid || root.child('rooms').child($game).child($code).child('members').child(auth.uid).exists())"
+          },
+          "turn": {
+            ".write": "auth != null && root.child('rooms').child($game).child($code).child('members').child(auth.uid).exists()"
           }
         }
       }

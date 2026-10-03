@@ -1,19 +1,26 @@
 /* ============================================================
-   חדר צפייה לאליאס: מודול משותף ל־Alias ול־18Alias
+   משחק בחדר: מודול משותף ל־Alias ול־18Alias
    ------------------------------------------------------------
-   הטלפון שמנהל את המשחק פותח חדר ומציג קוד ו־QR.
-   כל מי שסורק רואה בזמן אמת: ניקוד, תור, מסביר ומנחש, טיימר
-   ומילים שכבר נוחשו. המילה הנוכחית לעולם לא נשלחת לצופים.
+   כל זוג משחק מהטלפון שלו. מי שפותח את החדר מגדיר את הזוג שלו,
+   וכל השאר מצטרפים בסריקת QR ומגדירים את עצמם. אין צופים:
+   כל טלפון בחדר הוא זוג במשחק.
 
-   המשחק עצמו ממשיך לעבוד בלי אינטרנט. החדר הוא תוספת בלבד:
-   ספריית Firebase נטענת רק כשפותחים חדר או נכנסים לצפייה.
+   מהלך התור:
+   - התור רץ בטלפון של הזוג שמשחק (כרטיס, טיימר, ניחשו/דלג).
+   - בשאר הטלפונים רואים טיימר, ניקוד ומילים שנוחשו. אם המארח
+     הפעיל "הזוגות האחרים רואים את המילה" (רק כשאין "מילה אחרונה"),
+     רואים גם את המילה עצמה.
+   - בסוף התור הזוג הבא בתור מאשר את הסיכום, ויכול לתקן מילים.
+
+   מצב המשחק המשותף נשמר ב־Firebase Realtime Database, תחת
+   rooms/<game>/<code>. כל טלפון מבצע את הפעולות של עצמו
+   בטרנזקציה, כך שהמשחק לא תלוי בכך שטלפון אחד יישאר דלוק.
+   המשחק הרגיל בטלפון אחד לא משתנה וממשיך לעבוד בלי אינטרנט.
    ============================================================ */
 (function(){
 "use strict";
 
-/* ---- הגדרות Firebase: להדביק כאן את firebaseConfig מהקונסולה ----
-   Project settings → General → Your apps → Web app → SDK setup (Config)
-   כל עוד זה null, כפתור החדר לא מוצג והמשחק עובד בדיוק כמו קודם. */
+/* ---- הגדרות Firebase (Project settings → Your apps → Config) ---- */
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyAwl2XTaeciovpe8fYig5xaDQgM01twLAE",
   authDomain: "alias-7214e.firebaseapp.com",
@@ -28,341 +35,760 @@ const FB_VER = "10.12.2";
 const QR_LIB = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
 const ALPHA = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // בלי O/0, I/1, L
 const CODE_LEN = 4;
+const PLAY_SCREENS = ["handoff", "turn", "lastword", "summary", "approve", "winner"];
 
 const qs = new URLSearchParams(location.search);
-const viewCode = (qs.get("room") || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
-// מצב פיתוח: מסנכרן בין לשוניות באותו דפדפן, בלי Firebase. נדלק עם ?roomdev
+const urlCode = (qs.get("room") || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+// מצב בדיקה: ?roomdev מחליף את Firebase בגיבוי מקומי שמסנכרן בין לשוניות באותו דפדפן
 if(qs.has("roomdev")) try{ sessionStorage.setItem("alias-roomdev", "1"); }catch(e){}
 const DEV = (() => { try{ return sessionStorage.getItem("alias-roomdev") === "1"; }catch(e){ return false; } })();
 
-let G = null;        // מה שהמשחק מסר ב־attach
-let net = null;      // חיבור פעיל (Firebase או מקומי)
-let netP = null;
-let room = null;     // {code, viewers}
-let lastSent = "";
-let panelOpen = false, panelMsg = "", qrSvg = "";
-
+/* ---------- עזרים ---------- */
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const lsGet = k => { try{ return localStorage.getItem(k); }catch(e){ return null; } };
 const lsSet = (k, v) => { try{ v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); }catch(e){} };
-const enabled = () => !!FIREBASE_CONFIG || DEV;
+const arr = x => Array.isArray(x) ? x.filter(v => v != null) : x && typeof x === "object" ? Object.keys(x).sort((a, b) => a - b).map(k => x[k]).filter(v => v != null) : [];
+const clean = v => v === undefined ? null : JSON.parse(JSON.stringify(v));
+const rnd = n => Math.floor(Math.random() * n);
+
+let G = null;          // מה שהמשחק מסר ב־attach
+let db = null;         // חיבור לחדר
+let code = "";         // קוד החדר
+let me = "";           // מזהה הטלפון
+let game = null;       // מצב המשחק המשותף
+let turnLive = null;   // התור בשידור (מהטלפון שמשחק)
+let members = {};      // טלפונים בחדר: uid → {online}
+let host = undefined;  // uid של המארח
+let T = null;          // התור המקומי, רק בטלפון שמשחק
+let ui = {view: "connecting", msg: "", form: null, busy: false};
+let lastHTML = "", qrSvg = "", qrFor = "", lastScreenKey = "", confettiFor = "";
+let connected = true;
+let taken = false;      // המודול מצייר את המסך במקום המשחק
 
 /* ============================================================
-   חיבורים: Firebase Realtime Database, או מקומי לבדיקות
+   שכבת נתונים: Firebase, או גיבוי מקומי לבדיקות
    ============================================================ */
-async function firebaseNet(){
+let fbP = null;
+function firebase(){
+  if(fbP) return fbP;
   const base = `https://www.gstatic.com/firebasejs/${FB_VER}/`;
-  const [A, D, U] = await Promise.all([
-    import(base + "firebase-app.js"), import(base + "firebase-database.js"), import(base + "firebase-auth.js")]);
-  const app = A.initializeApp(FIREBASE_CONFIG, "alias-room");
-  const auth = U.getAuth(app);
-  const uid = (await U.signInAnonymously(auth)).user.uid;
-  const db = D.getDatabase(app);
-  const R = (g, c, p) => D.ref(db, `rooms/${g}/${c}` + (p ? "/" + p : ""));
-  const subs = [];
-  const watch = (r, fn) => subs.push(D.onValue(r, s => fn(s.val())));
-  // סימון "מחובר" שמתאפס לבד כשהטלפון המארח מתנתק
-  function keepOnline(g, c){
-    watch(D.ref(db, ".info/connected"), on => {
-      if(!on) return;
-      D.onDisconnect(R(g, c, "online")).set(false);
-      D.set(R(g, c, "online"), true).catch(() => {});
-    });
-  }
+  fbP = Promise.all([import(base + "firebase-app.js"), import(base + "firebase-database.js"), import(base + "firebase-auth.js")])
+    .then(async ([A, D, U]) => {
+      const app = A.initializeApp(FIREBASE_CONFIG, "alias-room");
+      const uid = (await U.signInAnonymously(U.getAuth(app))).user.uid;
+      return {D, uid, db: D.getDatabase(app)};
+    })
+    .catch(e => { fbP = null; throw e; });
+  return fbP;
+}
+async function openDB(gameId, c){
+  if(DEV) return localDB(gameId, c);
+  const {D, uid, db: fdb} = await firebase();
+  const base = `rooms/${gameId}/${c}`;
+  const R = p => D.ref(fdb, p ? base + "/" + p : base);
   return {
-    async claim(g, c){
-      const owner = (await D.get(R(g, c, "host"))).val();
-      if(owner && owner !== uid) return false;
-      if(!owner){
-        try{ await D.set(R(g, c, "host"), uid); }catch(e){ return false; }
-        await D.set(R(g, c, "created"), D.serverTimestamp());
-      }
-      keepOnline(g, c);
-      return true;
+    uid,
+    get: async p => (await D.get(R(p))).val(),
+    set: (p, v) => D.set(R(p), clean(v)),
+    remove: p => D.remove(R(p)),
+    async tx(p, fn){
+      const res = await D.runTransaction(R(p), cur => { const v = fn(cur); return v === undefined ? undefined : clean(v); }, {applyLocally: true});
+      return res.committed;
     },
-    publish(g, c, state){ return D.set(R(g, c, "state"), state); },
-    async close(g, c){ subs.splice(0).forEach(u => u()); await D.remove(R(g, c)); },
-    viewers(g, c, fn){ watch(R(g, c, "viewers"), v => fn(v ? Object.keys(v).length : 0)); },
-    join(g, c, fn){
-      const me = R(g, c, "viewers/" + uid);
-      watch(D.ref(db, ".info/connected"), on => {
-        if(!on) return;
-        D.onDisconnect(me).remove();
-        D.set(me, true).catch(() => {});
+    on: (p, cb) => D.onValue(R(p), s => cb(s.val())),
+    // מסמנים "מחובר" ומאפסים אוטומטית כשהטלפון מתנתק
+    presence(p){
+      D.onValue(D.ref(fdb, ".info/connected"), s => {
+        connected = !!s.val(); if(G && ui.view === "room") render();
+        if(!s.val()) return;
+        D.onDisconnect(R(p)).set(false);
+        D.set(R(p), true).catch(() => {});
       });
-      watch(R(g, c, "host"), h => { host = h; fn("host", h); });
-      watch(R(g, c, "online"), v => fn("online", v));
-      watch(R(g, c, "state"), v => fn("state", v));
     }
   };
 }
-
-function localNet(){
-  // לשוניות באותו דפדפן מדברות דרך localStorage. לבדיקות בלבד.
-  const K = (g, c) => `alias-roomdev:${g}:${c}`;
-  const read = (g, c) => { try{ return JSON.parse(lsGet(K(g, c))) || null; }catch(e){ return null; } };
+function localDB(gameId, c){
+  const K = `alias-roomdev:${gameId}:${c}`;
+  let uid; try{ uid = sessionStorage.getItem("alias-roomdev-uid"); }catch(e){}
+  if(!uid){ uid = "u" + Math.random().toString(36).slice(2, 8); try{ sessionStorage.setItem("alias-roomdev-uid", uid); }catch(e){} }
+  const load = () => { try{ return JSON.parse(lsGet(K)); }catch(e){ return null; } };
+  const at = (tree, p) => { let v = tree; for(const k of (p ? p.split("/") : [])){ if(v == null) return null; v = v[k]; } return v == null ? null : v; };
+  const put = (p, v) => {
+    const parts = p ? p.split("/") : [];
+    let tree = load();
+    if(!parts.length) tree = clean(v);
+    else {
+      tree = tree || {}; let o = tree;
+      for(const k of parts.slice(0, -1)){ if(o[k] == null || typeof o[k] !== "object") o[k] = {}; o = o[k]; }
+      if(v == null) delete o[parts[parts.length - 1]]; else o[parts[parts.length - 1]] = clean(v);
+    }
+    lsSet(K, tree == null ? null : JSON.stringify(tree));
+    fire();
+  };
+  const subs = [];
+  const fire = () => { const t = load(); subs.forEach(s => { const v = JSON.stringify(at(t, s.p)); if(v !== s.last){ s.last = v; s.cb(JSON.parse(v)); } }); };
+  window.addEventListener("storage", e => { if(e.key === K) fire(); });
   return {
-    async claim(g, c){ const r = read(g, c); if(!r) lsSet(K(g, c), JSON.stringify({host:"me", online:true})); return true; },
-    async publish(g, c, state){ const r = read(g, c) || {host:"me"}; r.state = state; r.online = true; lsSet(K(g, c), JSON.stringify(r)); },
-    async close(g, c){ lsSet(K(g, c), null); },
-    viewers(){},
-    join(g, c, fn){
-      const push = () => { const r = read(g, c); fn("host", r ? r.host : null); fn("online", r ? r.online : null); fn("state", r ? r.state : null); };
-      window.addEventListener("storage", e => { if(e.key === K(g, c)) push(); });
-      push();
-    }
+    uid,
+    get: async p => at(load(), p),
+    set: async (p, v) => put(p, v),
+    remove: async p => put(p, null),
+    async tx(p, fn){ const v = fn(clean(at(load(), p))); if(v === undefined) return false; put(p, v); return true; },
+    on(p, cb){ const s = {p, cb, last: undefined}; subs.push(s); setTimeout(fire, 0); return () => subs.splice(subs.indexOf(s), 1); },
+    presence(p){ put(p, true); window.addEventListener("pagehide", () => put(p, false)); }
   };
-}
-
-function getNet(){
-  if(!netP) netP = (FIREBASE_CONFIG ? firebaseNet() : Promise.resolve(localNet()))
-    .then(n => (net = n))
-    .catch(e => { netP = null; throw e; });
-  return netP;
 }
 
 /* ============================================================
-   צד המארח
+   מצב המשחק
    ============================================================ */
-const roomKey = () => G.key + "-room";
-const viewUrl = code => location.origin + location.pathname + "?room=" + code + (FIREBASE_CONFIG ? "" : "&roomdev");
-const newCode = () => Array.from({length: CODE_LEN}, () => ALPHA[Math.floor(Math.random() * ALPHA.length)]).join("");
+function norm(g){
+  if(!g) return null;
+  g.pairs = arr(g.pairs).map(p => Object.assign(p, {players: arr(p.players).map(x => ({name: x.name || "", kid: !!x.kid}))}));
+  g.used = g.used || {};
+  Object.keys(G.decks).forEach(k => { g.used[k] = arr(g.used[k]); });
+  if(g.review){ g.review.words = arr(g.review.words); g.review.drawn = normDrawn(g.review.drawn); if(g.review.lastPair == null) g.review.lastPair = -1; }
+  if(g.winner == null) g.winner = -1;
+  g.settings = Object.assign(defaultSettings(), g.settings || {});
+  return g;
+}
+const normDrawn = d => { const o = {}; Object.keys(G.decks).forEach(k => { o[k] = arr(d && d[k]); }); return o; };
+function defaultSettings(){
+  const s = Object.assign({time: 60, target: 30, skipPenalty: true, difficulty: "mixed", lastWord: true, sound: true}, (G.settings && G.settings()) || {});
+  return Object.assign(s, {showWord: !!s.showWord});
+}
+const isKid = p => G.hasKids && p.players.some(x => x.kid);
+const pairName = (p, i) => (p.name || "").trim() || (p.players[0].name && p.players[1].name ? `${p.players[0].name} ו${p.players[1].name}` : `זוג ${i + 1}`);
+const playerName = (p, j) => (p.players[j].name || "").trim() || (j ? "שחקן/ית ב׳" : "שחקן/ית א׳");
+const myIdx = () => game ? game.pairs.findIndex(p => p.uid === me) : -1;
+const isHost = () => host === me;
+const activeIdx = () => game ? game.turn : -1;
+const amActive = () => game && PLAY_SCREENS.includes(game.screen) && myIdx() === game.turn;
+const nextIdx = () => game ? (game.turn + 1) % game.pairs.length : -1;
+const amApprover = () => game && myIdx() === nextIdx();
+const online = uid => !members[uid] || members[uid].online !== false;
+const showWordOn = s => !!s.showWord && !s.lastWord;
+const ptsOf = (words, s) => { const ok = words.filter(w => w.ok).length; return ok - (s.skipPenalty ? words.length - ok : 0); };
 
-// תמונת מצב של המשחק בשביל הצופים. בלי המילה הנוכחית!
-function snapshot(){
-  const {S, T} = G.get();
-  const set = S.settings, cur = S.pairs[S.turn];
-  const out = {
-    v: 1, screen: S.screen, round: S.round, turn: S.turn, target: set.target,
-    winner: S.winner == null ? -1 : S.winner,
-    pairs: S.pairs.map((p, i) => ({n: G.pairName(p, i), a: G.playerName(p, 0), b: G.playerName(p, 1), s: p.score, k: G.isKidPair(p) ? 1 : 0}))
-  };
-  if(cur){
-    out.ex = G.playerName(cur, cur.next);
-    out.gu = G.playerName(cur, 1 - cur.next);
-    out.deck = G.isKidPair(cur) ? "🧸 כרטיסי תמונות" : "📝 רמה: " + (G.levelNames[set.difficulty] || "");
-  }
-  if(T && ["turn", "lastword", "summary"].includes(S.screen)){
-    out.t = {
-      secs: Math.max(0, Math.ceil(T.left / 1000)), total: Math.round(T.total / 1000), paused: T.paused ? 1 : 0,
-      words: T.words.map(w => ({w: w.w, e: w.e || "", ok: w.ok ? 1 : 0}))
-    };
-    if(S.screen === "summary"){
-      out.t.pts = G.turnPoints();
-      if(T.lastPair != null && T.lastPair >= 0) out.t.lw = {w: T.card.w, e: T.card.e || "", p: T.lastPair};
-    }
-  }
-  return out;
+// טרנזקציה על מצב המשחק, עם בדיקה שהמצב עדיין מה שציפינו
+async function act(guard, mutate){
+  const ok = await db.tx("game", raw => {
+    const g = norm(raw);
+    if(!g || !guard(g)) return undefined;
+    mutate(g);
+    return g;
+  }).catch(() => false);
+  return ok;
 }
 
-function publish(){
-  if(!room || !net || !G) return;
-  let snap;
-  try{ snap = JSON.stringify(snapshot()); }catch(e){ return; }
-  if(snap === lastSent) return;
-  lastSent = snap;
-  net.publish(G.game, room.code, JSON.parse(snap)).catch(() => { lastSent = ""; });
+/* ---------- כרטיסים ---------- */
+function deckKey(p, s){
+  let k = isKid(p) ? "kids" : s.difficulty;
+  if(k === "mixed") k = ["easy", "medium", "hard"][rnd(3)];
+  return k;
+}
+function drawCard(){
+  const p = game.pairs[game.turn], k = deckKey(p, game.settings), deck = G.decks[k] || [];
+  const mine = T.drawn[k] || (T.drawn[k] = []);
+  const used = new Set([...(game.used[k] || []), ...mine]);
+  let pool = deck.filter(c => !used.has(c.w));
+  if(!pool.length){ const m = new Set(mine); pool = deck.filter(c => !m.has(c.w)); }
+  if(!pool.length) pool = deck;
+  const c = pool[rnd(pool.length)];
+  mine.push(c.w);
+  return {w: c.w, e: c.e || "", r: (Math.random() * 6 - 3).toFixed(1)};
+}
+function cardHTML(c, still){
+  const s = still ? " still" : "";
+  return c.e
+    ? `<div class="card${s}" style="--r:${c.r || 0}deg"><div class="emoji" aria-hidden="true">${c.e}</div><div class="kidword">${esc(c.w)}</div></div>`
+    : `<div class="card${s}" style="--r:${c.r || 0}deg"><div class="word">${esc(c.w)}</div></div>`;
 }
 
-async function startRoom(code){
-  const n = await getNet();
-  for(let tries = 0; tries < 6; tries++){
-    const c = code || newCode();
-    if(await n.claim(G.game, c)){
-      room = {code: c, viewers: 0};
-      lsSet(roomKey(), c);
-      n.viewers(G.game, c, k => { if(room && room.code === c){ room.viewers = k; refreshUI(); } });
-      lastSent = ""; publish(); refreshUI();
-      return;
-    }
-    if(code){ lsSet(roomKey(), null); return; } // החדר השמור כבר לא שלנו
+/* ---------- צליל, רטט, מסך דולק ---------- */
+let AC = null, WL = null;
+function audio(){ try{ if(!AC) AC = new (window.AudioContext || window.webkitAudioContext)(); if(AC.state === "suspended") AC.resume(); }catch(e){} }
+function beep(f, d){
+  if(!game || !game.settings.sound || !AC) return;
+  try{ const o = AC.createOscillator(), g = AC.createGain(); o.type = "square"; o.frequency.value = f;
+    g.gain.setValueAtTime(0.07, AC.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime + d);
+    o.connect(g); g.connect(AC.destination); o.start(); o.stop(AC.currentTime + d); }catch(e){}
+}
+const buzz = ms => { try{ navigator.vibrate && navigator.vibrate(ms); }catch(e){} };
+async function wake(){ try{ if("wakeLock" in navigator && !WL && !document.hidden){ WL = await navigator.wakeLock.request("screen"); WL.addEventListener("release", () => { WL = null; }); } }catch(e){} }
+
+/* ============================================================
+   התור בטלפון של הזוג שמשחק
+   ============================================================ */
+function pushTurn(){
+  if(!T) return;
+  db.set("turn", {tid: game.tid, words: T.words, card: T.card, left: Math.max(0, Math.round(T.left)), total: T.total, paused: T.paused ? 1 : 0, drawn: T.drawn}).catch(() => {});
+}
+function tick(){
+  if(!T) return;
+  const now = performance.now();
+  if(T.paused){ T.last = now; return; }
+  T.left -= now - T.last; T.last = now;
+  updateTimer();
+  const s = Math.ceil(T.left / 1000);
+  if(s !== T.sentSec){ T.sentSec = s; pushTurn(); }
+  if(s <= 5 && s > 0 && s !== T.lastBeep){ T.lastBeep = s; beep(880, 0.08); }
+  if(T.left <= 0){ beep(220, 0.7); buzz([300, 100, 300]); finishTurn(); }
+}
+function stopT(){ if(T && T.iv) clearInterval(T.iv); T = null; }
+function updateTimer(){
+  const secs = document.getElementById("secs"), bar = document.getElementById("bar"), tm = document.getElementById("timer");
+  if(!secs || !T) return;
+  const ts = timerState(T.left, T.total);
+  secs.textContent = ts.secs; bar.style.width = ts.pct + "%"; tm.className = "timer " + ts.cls;
+}
+function timerState(left, total){
+  const secs = Math.max(0, Math.ceil(left / 1000)), pct = Math.max(0, left / total * 100);
+  return {secs, pct, cls: secs <= 5 ? "danger" : secs <= 15 ? "warn" : ""};
+}
+// הטלפון שמשחק נטען מחדש באמצע תור: ממשיכים מאותה נקודה, מושהה
+function restoreT(){
+  if(T || !game || game.screen !== "turn" || !amActive() || !turnLive || turnLive.tid !== game.tid) return;
+  T = {words: arr(turnLive.words).map(w => ({w: w.w, e: w.e || "", ok: !!w.ok})), card: turnLive.card, left: turnLive.left, total: turnLive.total,
+    drawn: normDrawn(turnLive.drawn), paused: true, restored: true, last: performance.now()};
+  T.iv = setInterval(tick, 100);
+}
+async function finishTurn(byHost){
+  const src = byHost ? {words: arr(turnLive && turnLive.words), card: (turnLive && turnLive.card) || {w: ""}, drawn: normDrawn(turnLive && turnLive.drawn)} : T;
+  const tid = game.tid;
+  if(!byHost) stopT();
+  await act(g => g.screen === "turn" && g.tid === tid, g => {
+    g.review = {words: src.words.map(w => ({w: w.w, e: w.e || "", ok: w.ok ? 1 : 0})), card: {w: src.card.w, e: src.card.e || ""}, lastPair: -1, drawn: src.drawn};
+    g.screen = g.settings.lastWord ? "lastword" : "summary";
+  });
+  db.remove("turn").catch(() => {});
+}
+
+/* ============================================================
+   פעולות
+   ============================================================ */
+const A = {
+  // ---- טופס הזוג ----
+  kid(el){ const p = ui.form.players[+el.dataset.j]; p.kid = !p.kid; render(); },
+  async submitForm(){
+    const f = ui.form;
+    if(!f.players[0].name.trim() || !f.players[1].name.trim()){ ui.msg = "צריך למלא את השמות של שני השחקנים"; return render(true); }
+    lsSet("alias-room-me", JSON.stringify({name: f.name, players: f.players}));
+    const pair = {uid: me, name: f.name.trim(), players: f.players.map(x => ({name: x.name.trim(), kid: G.hasKids && !!x.kid})), score: 0, next: 0};
+    ui.busy = true; ui.msg = ""; render();
+    try{
+      if(f.mode === "create") await createRoom(pair);
+      else if(f.mode === "edit") await act(g => g.status === "lobby", g => { const i = g.pairs.findIndex(p => p.uid === me); if(i >= 0) g.pairs[i] = Object.assign(g.pairs[i], pair, {score: 0, next: 0}); });
+      else await joinRoom(pair);
+      if(ui.view === "form") ui.view = "room";
+    }catch(e){ ui.msg = netError(e); }
+    ui.busy = false; render(true);
+  },
+  cancelForm(){ if(ui.form.mode === "edit"){ ui.view = "room"; render(); } else home(); },
+
+  // ---- לובי ----
+  editPair(){ const p = game.pairs[myIdx()]; ui.form = {mode: "edit", name: p.name, players: p.players.map(x => ({...x}))}; ui.msg = ""; ui.view = "form"; render(); },
+  async leave(){
+    if(!confirm("לצאת מהחדר?")) return;
+    if(game && game.status === "lobby") await act(g => true, g => { g.pairs = g.pairs.filter(p => p.uid !== me); });
+    db.remove("members/" + me).catch(() => {});
+    home();
+  },
+  async kick(el){
+    const uid = el.dataset.u, p = game.pairs.find(x => x.uid === uid);
+    if(!p || !confirm(`להוציא את ${pairName(p, game.pairs.indexOf(p))} מהחדר?`)) return;
+    await act(g => g.status === "lobby", g => { g.pairs = g.pairs.filter(x => x.uid !== uid); });
+    db.remove("members/" + uid).catch(() => {});
+  },
+  set(el){ const k = el.dataset.k, v = el.dataset.v; act(g => g.status === "lobby", g => { g.settings[k] = isNaN(+v) ? v : +v; }); },
+  toggle(el){ const k = el.dataset.k; act(g => g.status === "lobby", g => { g.settings[k] = !g.settings[k]; if(g.settings.lastWord) g.settings.showWord = false; }); },
+  target(el){ act(g => g.status === "lobby", g => { g.settings.target = Math.min(100, Math.max(10, g.settings.target + +el.dataset.v)); }); },
+  async share(el){
+    const url = joinUrl();
+    if(navigator.share){ try{ await navigator.share({title: document.title, text: "הצטרפו למשחק שלנו", url}); }catch(e){} }
+    else { try{ await navigator.clipboard.writeText(url); el.textContent = "הועתק ✓"; }catch(e){ prompt("הלינק לחדר:", url); } }
+  },
+  start(){
+    audio();
+    act(g => g.status === "lobby" && g.pairs.length >= 2, g => {
+      g.status = "play"; g.screen = "handoff"; g.turn = 0; g.round = 1; g.winner = -1; g.tid = (g.tid || 0) + 1;
+      g.pairs.forEach(p => { p.score = 0; p.next = 0; });
+    });
+  },
+
+  // ---- התור ----
+  swap(){ act(g => g.screen === "handoff" && g.pairs[g.turn].uid === me, g => { const p = g.pairs[g.turn]; p.next = 1 - p.next; }); },
+  async startTurn(){
+    if(!amActive() || game.screen !== "handoff") return;
+    audio(); wake();
+    const ms = game.settings.time * 1000;
+    T = {words: [], drawn: normDrawn(), total: ms, left: ms, paused: false, last: performance.now()};
+    T.card = drawCard();
+    const tid = game.tid;
+    pushTurn();
+    const ok = await act(g => g.screen === "handoff" && g.tid === tid && g.pairs[g.turn].uid === me, g => { g.screen = "turn"; });
+    if(!ok){ stopT(); return; }
+    T.last = performance.now();
+    T.iv = setInterval(tick, 100);
+    render();
+  },
+  answer(el){
+    if(!T || T.paused || T.left <= 0) return;
+    T.words.push({w: T.card.w, e: T.card.e, ok: el.dataset.v === "1"});
+    T.card = drawCard();
+    pushTurn(); render();
+  },
+  pause(){ if(!T) return; T.paused = true; pushTurn(); render(); },
+  resume(){ if(!T) return; audio(); wake(); T.paused = false; T.restored = false; T.last = performance.now(); pushTurn(); render(); },
+  endTurn(){ if(T) finishTurn(); },
+  hostEndTurn(){ if(confirm("לסיים את התור של הזוג שמשחק? המילים שכבר נענו יישמרו.")) finishTurn(true); },
+  lastWord(el){ const v = +el.dataset.v, tid = game.tid; act(g => g.screen === "lastword" && g.tid === tid, g => { g.review.lastPair = v; g.screen = "summary"; }); },
+  flip(el){
+    const i = +el.dataset.i, tid = game.tid, scr = game.screen;
+    act(g => g.screen === scr && g.tid === tid && g.review, g => { const w = g.review.words[i]; if(w) w.ok = w.ok ? 0 : 1; });
+  },
+  submit(){ const tid = game.tid; act(g => g.screen === "summary" && g.tid === tid, g => { g.screen = "approve"; }); },
+  approve(){
+    const tid = game.tid;
+    act(g => g.screen === "approve" && g.tid === tid && g.review, g => {
+      const p = g.pairs[g.turn], r = g.review;
+      p.score += ptsOf(r.words.map(w => ({ok: !!w.ok})), g.settings);
+      if(r.lastPair >= 0 && g.pairs[r.lastPair]) g.pairs[r.lastPair].score += 1;
+      Object.keys(r.drawn).forEach(k => {
+        const all = g.used[k].concat(r.drawn[k]);
+        g.used[k] = all.length >= (G.decks[k] || []).length ? r.drawn[k] : all;
+      });
+      p.next = 1 - p.next; g.review = null; g.tid++;
+      g.turn++;
+      if(g.turn >= g.pairs.length){
+        g.turn = 0; g.round++;
+        const max = Math.max(...g.pairs.map(x => x.score));
+        const leaders = g.pairs.map((x, i) => [x, i]).filter(([x]) => x.score === max);
+        if(max >= g.settings.target && leaders.length === 1){ g.winner = leaders[0][1]; g.screen = "winner"; return; }
+      }
+      g.screen = "handoff";
+    });
+  },
+  rematch(){
+    act(g => g.screen === "winner", g => {
+      g.screen = "handoff"; g.turn = 0; g.round = 1; g.winner = -1; g.tid++;
+      g.pairs.forEach(p => { p.score = 0; p.next = 0; });
+    });
+  },
+  async closeRoom(){
+    if(!confirm("לסגור את החדר? כל הטלפונים יתנתקו מהמשחק.")) return;
+    await db.remove("").catch(() => {});
+    home();
+  },
+  home(){ home(); },
+  exit(){ if(confirm(isHost() ? "לצאת מהחדר בטלפון הזה? החדר נשאר פתוח, ואפשר לחזור אליו דרך הלינק." : "לצאת מהחדר בטלפון הזה? אפשר לחזור דרך הלינק.")) home(); }
+};
+function home(){
+  lsSet(G.key + "-room", null);
+  location.href = location.pathname;
+}
+function netError(e){
+  if(e && e.message === "started") return "המשחק בחדר הזה כבר התחיל. אפשר להצטרף רק לפני שמתחילים.";
+  if(e && e.message === "gone") return "החדר הזה לא קיים או שכבר נסגר";
+  return navigator.onLine === false ? "צריך חיבור לאינטרנט כדי לשחק בחדר" : "משהו השתבש בחיבור. נסו שוב.";
+}
+
+/* ============================================================
+   כניסה לחדר
+   ============================================================ */
+const joinUrl = () => location.origin + location.pathname + "?room=" + code + (DEV ? "&roomdev" : "");
+const newCode = () => Array.from({length: CODE_LEN}, () => ALPHA[rnd(ALPHA.length)]).join("");
+
+async function createRoom(pair){
+  for(let i = 0; i < 6; i++){
+    const c = newCode();
+    const d = await openDB(G.game, c);
+    me = d.uid;
+    if(await d.get("host")) continue;
+    try{ await d.set("host", me); }catch(e){ continue; }
+    db = d; code = c; pair.uid = me;
+    await db.set("created", Date.now());
+    await db.set("members/" + me, {online: true});
+    await db.set("game", {v: 2, status: "lobby", screen: "lobby", settings: defaultSettings(), pairs: [pair],
+      turn: 0, round: 1, winner: -1, tid: 0, used: {}});
+    lsSet(G.key + "-room", code);
+    await listen();
+    return;
   }
-  throw new Error("no-code");
+  throw new Error("code");
+}
+async function joinRoom(pair){
+  await db.set("members/" + me, {online: true});
+  const ok = await act(g => g.status === "lobby" || g.pairs.some(p => p.uid === me), g => {
+    const i = g.pairs.findIndex(p => p.uid === me);
+    if(i >= 0) g.pairs[i] = Object.assign(g.pairs[i], pair, {score: g.pairs[i].score, next: g.pairs[i].next});
+    else g.pairs.push(pair);
+  });
+  if(!ok){ db.remove("members/" + me).catch(() => {}); throw new Error("started"); }
+  lsSet(G.key + "-room", code);
+  db.presence("members/" + me + "/online");
+}
+// מאזינים לחדר. מחזיר אחרי שהגיע המצב הראשון
+function listen(){
+  return new Promise(resolve => {
+    let first = true;
+    db.on("host", v => { host = v; if(v === null && !first) { ui.view = "closed"; stopT(); } render(); });
+    db.on("members", v => { members = v || {}; render(); });
+    db.on("turn", v => { turnLive = v; if(game && game.screen === "turn" && amActive()){ restoreT(); if(T && !T.restoredRendered){ T.restoredRendered = true; render(); } return; } render(); });
+    db.on("game", v => {
+      game = norm(v);
+      if(!game){ if(!first){ ui.view = "closed"; stopT(); render(); } }
+      else onGame();
+      if(first){ first = false; resolve(); }
+    });
+    if(myIdx() >= 0 || ui.form && ui.form.mode === "create") db.presence("members/" + me + "/online");
+  });
+}
+function onGame(){
+  if(T && (game.screen !== "turn" || !amActive())) stopT();
+  restoreT();
+  // התראה כשמגיע התור שלנו או כשצריך לאשר
+  const key = game.screen + ":" + game.tid;
+  if(key !== lastScreenKey){
+    if(lastScreenKey && ((game.screen === "handoff" && amActive()) || (game.screen === "approve" && amApprover()))){ audio(); beep(660, 0.12); buzz([120, 60, 120]); }
+    lastScreenKey = key;
+  }
+  if(ui.view === "room" && myIdx() < 0 && game.status !== "lobby"){ ui.view = "error"; ui.msg = "הזוג שלך כבר לא נמצא בחדר הזה"; }
+  if(ui.view === "room" && myIdx() < 0 && game.status === "lobby"){ ui.view = "error"; ui.msg = "המארח הוציא את הזוג שלך מהחדר"; lsSet(G.key + "-room", null); }
+  render();
 }
 
-async function endRoom(){
-  if(!room) return;
-  const c = room.code;
-  room = null; lsSet(roomKey(), null); qrSvg = "";
-  try{ await net.close(G.game, c); }catch(e){}
-  closePanel(); refreshUI();
+// נקרא מהמשחק בזמן העלייה. מחזיר true אם המודול לוקח פיקוד
+function boot(){
+  const saved = lsGet(G.key + "-room");
+  const c = urlCode || saved;
+  if(!c) return false;
+  code = c; taken = true;
+  ui.view = "connecting"; render();
+  (async () => {
+    try{
+      db = await openDB(G.game, code);
+      me = db.uid;
+      const g = await db.get("game");
+      // חדר ישן שנשאר שמור בטלפון: לא נכנסים אליו אוטומטית
+      if(g && !urlCode && Date.now() - ((await db.get("created")) || 0) > 12 * 3600e3){ lsSet(G.key + "-room", null); location.href = location.pathname; return; }
+      if(!g){ if(!urlCode){ lsSet(G.key + "-room", null); location.href = location.pathname; return; } ui.view = "error"; ui.msg = "החדר הזה לא קיים או שכבר נסגר"; return render(); }
+      await listen();
+      if(myIdx() >= 0){ ui.view = "room"; db.presence("members/" + me + "/online"); lsSet(G.key + "-room", code); }
+      else if(game.status !== "lobby"){ ui.view = "error"; ui.msg = netError(new Error("started")); }
+      else { ui.form = Object.assign({mode: "join"}, savedPair()); ui.view = "form"; }
+      render();
+    }catch(e){ ui.view = "error"; ui.msg = netError(e); render(); }
+  })();
+  return true;
+}
+function savedPair(){
+  try{ const s = JSON.parse(lsGet("alias-room-me")); if(s && s.players) return {name: s.name || "", players: arr(s.players).map(x => ({name: x.name || "", kid: !!x.kid}))}; }catch(e){}
+  return {name: "", players: [{name: "", kid: false}, {name: "", kid: false}]};
+}
+// נקרא מכפתור במסך הזוגות של המשחק
+function startCreate(){
+  const p = G.firstPair && G.firstPair();
+  const base = savedPair();
+  if(p && p.players && p.players.some(x => x.name.trim())) { base.name = p.name || ""; base.players = p.players.map(x => ({name: x.name, kid: !!x.kid})); }
+  ui.form = Object.assign({mode: "create"}, base);
+  ui.msg = ""; ui.view = "form"; taken = true;
+  history.replaceState(null, "", location.pathname);
+  render();
+}
+
+/* ============================================================
+   מסכים
+   ============================================================ */
+function bar(){
+  const p = game && game.pairs[myIdx()];
+  return `<div class="room-bar"><span>📡 חדר <b dir="ltr">${esc(code)}</b></span>
+    ${!connected ? `<span class="room-off">אין חיבור…</span>` : p ? `<span class="room-me">${esc(pairName(p, myIdx()))}</span>` : ""}
+    <button class="room-x" data-r="exit" aria-label="יציאה מהחדר">✕</button></div>`;
+}
+function board(hi){
+  return `<div class="board-title"><span>ניקוד</span><span>יעד: ${game.settings.target}</span></div>
+  <ol class="board">${game.pairs.map((p, i) => `<li class="${i === hi ? "now" : ""}">
+    <div class="who"><b>${esc(pairName(p, i))}${p.uid === me ? ` <span class="room-tag">אתם</span>` : ""}${online(p.uid) ? "" : ` <span class="room-tag off">לא מחובר</span>`}</b><small>${esc(playerName(p, 0))} ו${esc(playerName(p, 1))}</small></div>
+    <span class="pts">${p.score}</span></li>`).join("")}</ol>`;
+}
+function screen(body, footer){
+  return `<div class="screen">${bar()}<div class="scroll">${body}</div>${footer ? `<div class="footer">${footer}</div>` : ""}</div>`;
+}
+function msgScreen(icon, title, sub, footer){
+  return `<div class="screen"><div class="scroll center" style="justify-content:center">
+    <div class="rv-hidden">${icon}<b>${title}</b>${sub ? `<small>${sub}</small>` : ""}</div></div>
+    <div class="footer">${footer || `<button class="btn plain" data-r="home">חזרה למשחק בטלפון אחד</button>`}</div></div>`;
+}
+
+function vForm(){
+  const f = ui.form, title = {create: "משחק בחדר", join: `הצטרפות לחדר ${esc(code)}`, edit: "עריכת הזוג שלנו"}[f.mode];
+  const lead = {create: "כל זוג משחק מהטלפון שלו. קודם, מי אתם? אחר כך יופיע QR שהזוגות האחרים סורקים כדי להצטרף.",
+    join: "מי אתם? הזוג שלכם ישחק מהטלפון הזה.", edit: ""}[f.mode];
+  return `<div class="screen"><div class="scroll">
+    <h2>${title}</h2>${lead ? `<p class="room-lead2">${lead}</p>` : ""}
+    <div class="pair">
+      <div class="pair-head"><span class="num">👥</span>
+        <input type="text" data-ri="name" value="${esc(f.name)}" placeholder="שם הזוג (לא חובה)" maxlength="24"></div>
+      ${[0, 1].map(j => `<div class="player">
+        <input type="text" data-ri="player" data-j="${j}" value="${esc(f.players[j].name)}" placeholder="${j ? "שחקן/ית 2" : "שחקן/ית 1"}" maxlength="20">
+        ${G.hasKids ? `<button class="chip" data-r="kid" data-j="${j}" aria-pressed="${!!f.players[j].kid}">ילד/ה 🧒</button>` : ""}
+      </div>`).join("")}
+      ${G.hasKids ? `<span class="tag">${f.players.some(x => x.kid) ? "🧸 הזוג הזה יקבל כרטיסי תמונות" : "📝 כרטיסי מילים"}</span>` : ""}
+    </div>
+    ${ui.msg ? `<div class="notice">${esc(ui.msg)}</div>` : ""}
+  </div><div class="footer">
+    <button class="btn" data-r="submitForm" ${ui.busy ? "disabled" : ""}>${ui.busy ? "רגע…" : {create: "פתיחת החדר", join: "הצטרפות למשחק", edit: "שמירה"}[f.mode]}</button>
+    <button class="link" data-r="cancelForm">ביטול</button>
+  </div></div>`;
+}
+
+function seg(k, opts, val){
+  return `<div class="seg">${opts.map(([v, l]) => `<button data-r="set" data-k="${k}" data-v="${v}" aria-pressed="${String(val) === String(v)}">${l}</button>`).join("")}</div>`;
+}
+function sw(k, title, sub){
+  const on = !!game.settings[k];
+  return `<div class="switch-row"><div>${title}${sub ? `<small>${sub}</small>` : ""}</div>
+    <button class="switch" role="switch" aria-checked="${on}" aria-label="${title}" data-r="toggle" data-k="${k}"></button></div>`;
+}
+function settingsSummary(s){
+  const t = {30: "30 שניות", 45: "45 שניות", 60: "דקה", 90: "90 שניות", 120: "2 דקות"}[s.time] || s.time + " שניות";
+  const bits = [`⏱ ${t} לתור`, `🎯 יעד ${s.target}`];
+  if(game.pairs.some(p => !isKid(p)) && G.levelNames[s.difficulty]) bits.push(`רמה: ${G.levelNames[s.difficulty]}`);
+  if(s.lastWord) bits.push("כולל מילה אחרונה");
+  if(showWordOn(s)) bits.push("👀 כולם רואים את המילה");
+  return bits.join(" · ");
+}
+function vLobby(){
+  const s = game.settings, h = isHost(), n = game.pairs.length;
+  if(qrFor !== code){ qrFor = code; makeQR(joinUrl()).then(svg => { qrSvg = svg; render(); }).catch(() => { qrSvg = `<span class="room-wait">לא הצלחנו להציג QR. אפשר לשתף את הלינק.</span>`; render(); }); }
+  const pairs = `<ol class="board">${game.pairs.map((p, i) => `<li>
+      <div class="who"><b>${esc(pairName(p, i))}${p.uid === me ? ` <span class="room-tag">אתם</span>` : ""}${p.uid === host ? ` <span class="room-tag">מארח</span>` : ""}${online(p.uid) ? "" : ` <span class="room-tag off">לא מחובר</span>`}</b>
+        <small>${esc(playerName(p, 0))} ו${esc(playerName(p, 1))}${isKid(p) ? " · 🧸 כרטיסי תמונות" : ""}</small></div>
+      ${h && p.uid !== me ? `<button class="del" data-r="kick" data-u="${esc(p.uid)}" aria-label="הוצאה מהחדר">✕</button>` : ""}</li>`).join("")}</ol>`;
+  const settings = h ? `<h2 style="margin-top:22px">הגדרות</h2>
+    <div class="group"><span class="label">זמן לכל תור</span>${seg("time", [[30, "30 ש׳"], [45, "45 ש׳"], [60, "דקה"], [90, "90 ש׳"], [120, "2 דק׳"]], s.time)}</div>
+    <div class="group"><span class="label">ניקוד לניצחון</span>
+      <div class="stepper"><button data-r="target" data-v="5" aria-label="הגדלה">+</button><output>${s.target}</output><button data-r="target" data-v="-5" aria-label="הקטנה">−</button></div></div>
+    ${game.pairs.some(p => !isKid(p)) ? `<div class="group"><span class="label">${G.levelLabel}</span>${seg("difficulty", G.levels, s.difficulty)}
+      <p class="hint">${G.levelHints[s.difficulty] || ""}</p></div>` : ""}
+    <div class="group">
+      ${sw("skipPenalty", "דילוג מוריד נקודה")}
+      ${sw("lastWord", "המילה האחרונה", "כשהזמן נגמר, כל מי שבחדר יכול לנחש")}
+      ${s.lastWord ? `<p class="hint room-hint">אפשר להציג את המילה לזוגות האחרים רק כשהמילה האחרונה כבויה</p>` : sw("showWord", "הזוגות האחרים רואים את המילה", "כדי לתפוס מי שאומר חלק מהמילה")}
+      ${sw("sound", "צלילים")}
+    </div>` : `<p class="room-sub" style="margin-top:14px">${settingsSummary(s)}</p>`;
+  const body = `<div class="center">
+      <div class="room-qr">${qrSvg || `<span class="room-wait">טוען קוד…</span>`}</div>
+      <div class="room-code" dir="ltr">${esc(code)}</div>
+      <p class="room-sub">כל זוג סורק עם הטלפון שלו ומצטרף</p>
+      <button class="btn plain room-share" data-r="share">${navigator.share ? "שיתוף הלינק" : "העתקת הלינק"}</button>
+    </div>
+    <h2 style="margin-top:18px">הזוגות בחדר (${n})</h2>${pairs}${settings}`;
+  const footer = h
+    ? `<button class="btn" data-r="start" ${n < 2 ? "disabled" : ""}>${n < 2 ? "מחכים לזוג נוסף…" : "יאללה, מתחילים!"}</button>
+       <button class="link" data-r="editPair">עריכת הזוג שלנו</button><button class="link" data-r="closeRoom">סגירת החדר</button>`
+    : `<div class="room-wait-row">⏳ מחכים שהמארח יתחיל את המשחק</div>
+       <button class="link" data-r="editPair">עריכת הזוג שלנו</button><button class="link" data-r="leave">יציאה מהחדר</button>`;
+  return screen(body, footer);
+}
+
+function vHandoff(){
+  const i = game.turn, p = game.pairs[i], mine = amActive();
+  const max = Math.max(...game.pairs.map(x => x.score)), leaders = game.pairs.filter(x => x.score === max).length;
+  let notice = "";
+  if(max >= game.settings.target) notice = leaders > 1 && i === 0 ? "שוויון בצמרת! ממשיכים לסבב נוסף" : "מישהו עבר את היעד, זה הסבב האחרון";
+  const deck = isKid(p) ? "🧸 כרטיסי תמונות" : `📝 ${G.levelLabel}: ${G.levelNames[game.settings.difficulty] || ""}`;
+  const body = `<div class="center">
+    <div class="round">סבב ${game.round}</div>
+    <h1 class="display turn-of">${mine ? "התור שלכם!" : `התור של ${esc(pairName(p, i))}`}</h1>
+    ${notice ? `<div class="notice">${notice}</div>` : ""}
+    <div class="roles">
+      <div class="role"><small>מסביר/ה</small><b>${esc(playerName(p, p.next))}</b></div>
+      ${mine ? `<button class="swap" data-r="swap" aria-label="החלפה בין המסביר למנחש">⇄<small>החלפה</small></button>` : ""}
+      <div class="role"><small>מנחש/ת</small><b>${esc(playerName(p, 1 - p.next))}</b></div>
+    </div>
+    <div class="deck-tag">${deck}</div>${board(i)}</div>`;
+  const footer = mine ? `<button class="btn" data-r="startTurn">${esc(playerName(p, p.next))} מחזיק/ה את הטלפון, מוכנים!</button>`
+    : `<div class="room-wait-row">⏳ מחכים ש${esc(pairName(p, i))} יתחילו</div>`;
+  return screen(body, footer);
+}
+
+function vTurnActive(){
+  const p = game.pairs[game.turn], ts = timerState(T.left, T.total);
+  const ok = T.words.filter(w => w.ok).length;
+  return `<div class="screen">${bar()}
+    <div class="turn"><div class="turn-top">
+      <span class="secs" id="secs">${ts.secs}</span>
+      <div class="timer ${ts.cls}" id="timer"><i id="bar" style="width:${ts.pct}%"></i></div>
+      <button class="pause" data-r="pause" aria-label="השהיה">⏸</button></div>
+      <div class="turn-meta"><span>${esc(playerName(p, p.next))} מסביר/ה</span><span>✅ ${ok} &nbsp; ⏭ ${T.words.length - ok}</span></div></div>
+    <div class="stage" id="stage">${cardHTML(T.card)}</div>
+    <div class="answer">
+      <button class="btn red skip" data-r="answer" data-v="0">דלג</button>
+      <button class="btn green ok" data-r="answer" data-v="1">✅ ניחשו!</button></div>
+    ${T.paused ? `<div class="overlay"><div class="box">
+      <h2 class="display">מושהה</h2>
+      ${T.restored ? `<p style="margin:-6px 0 4px">התור נשמר. נשארו ${Math.ceil(T.left / 1000)} שניות</p>` : ""}
+      <button class="btn" data-r="resume">המשך</button>
+      <button class="btn plain" data-r="endTurn">סיום התור עכשיו</button></div></div>` : ""}
+  </div>`;
+}
+function wordList(words, flip){
+  if(!words.length) return `<p class="empty">לא נענו מילים בתור הזה</p>`;
+  return flip
+    ? `<ul class="words">${words.map((w, i) => `<li><button class="${w.ok ? "" : "no"}" data-r="flip" data-i="${i}" aria-pressed="${!!w.ok}">
+        <span class="mark">${w.ok ? "✓" : "✕"}</span><span class="w">${w.e ? w.e + " " : ""}${esc(w.w)}</span></button></li>`).join("")}</ul>`
+    : `<ul class="rv-words">${words.map(w => `<li class="${w.ok ? "" : "no"}"><span class="mark">${w.ok ? "✓" : "✕"}</span><span>${w.e ? w.e + " " : ""}${esc(w.w)}</span></li>`).join("")}</ul>`;
+}
+function vTurnOther(){
+  const i = game.turn, p = game.pairs[i], t = turnLive && turnLive.tid === game.tid ? turnLive : null;
+  const words = t ? arr(t.words) : [], ok = words.filter(w => w.ok).length;
+  const ts = t ? timerState(t.left, t.total) : {secs: "", pct: 100, cls: ""};
+  const see = showWordOn(game.settings) && t && t.card;
+  const body = `<div class="round" style="text-align:center">סבב ${game.round} · התור של ${esc(pairName(p, i))}</div>
+    <div class="turn-top"><span class="secs">${ts.secs}</span><div class="timer ${ts.cls}"><i style="width:${ts.pct}%"></i></div></div>
+    <div class="turn-meta"><span>${esc(playerName(p, p.next))} מסביר/ה ל${esc(playerName(p, 1 - p.next))}</span><span>✅ ${ok} &nbsp; ⏭ ${words.length - ok}</span></div>
+    ${t && t.paused ? `<div class="rv-hidden">⏸<b>התור מושהה</b></div>`
+      : see ? `<div class="stage room-stage">${cardHTML(t.card, true)}</div><p class="room-sub" style="text-align:center">🤫 לא לומר בקול! עוקבים שהמסביר/ה לא אומר/ת חלק מהמילה</p>`
+      : `<div class="rv-hidden">🤫<b>המילה מוסתרת</b><small>רק ${esc(pairName(p, i))} רואים אותה</small></div>`}
+    ${words.length ? wordList(words.slice().reverse()) : ""}${board(i)}`;
+  const footer = isHost() && !online(p.uid) ? `<button class="link" data-r="hostEndTurn">${esc(pairName(p, i))} לא מחוברים? סיום התור במקומם</button>` : "";
+  return screen(body, footer);
+}
+function vLastWord(){
+  const mine = amActive(), r = game.review;
+  if(mine) return screen(`<div class="center">
+      <h1 class="display turn-of">הזמן נגמר!</h1>
+      <p style="margin:0 0 10px">המילה האחרונה פתוחה לכולם. מי ניחש ראשון?</p>
+      <div class="stage lw-card" style="width:100%;padding:0">${cardHTML(r.card)}</div>
+      <div class="pick">${game.pairs.map((p, i) => `<button class="btn plain" data-r="lastWord" data-v="${i}">${esc(pairName(p, i))}</button>`).join("")}
+        <button class="link" data-r="lastWord" data-v="-1">אף אחד לא ניחש</button></div></div>`);
+  return screen(`<div class="center"><h1 class="display turn-of">הזמן נגמר!</h1>
+    <div class="rv-hidden">🗣️<b>המילה האחרונה פתוחה לכולם</b><small>מנחשים בקול! ${esc(pairName(game.pairs[game.turn], game.turn))} יסמנו מי ניחש ראשון</small></div>
+    ${board(game.turn)}</div>`);
+}
+function reviewBlock(flip){
+  const r = game.review, pts = ptsOf(r.words.map(w => ({ok: !!w.ok})), game.settings);
+  return `${wordList(r.words, flip)}
+    ${r.lastPair >= 0 && game.pairs[r.lastPair] ? `<div class="lw-row">המילה האחרונה (${r.card.e ? r.card.e + " " : ""}${esc(r.card.w)}): +1 ל${esc(pairName(game.pairs[r.lastPair], r.lastPair))}</div>` : ""}
+    <div class="total"><span>נקודות בתור:</span><b>${pts > 0 ? "+" : ""}${pts}</b></div>`;
+}
+function vSummary(){
+  const i = game.turn, p = game.pairs[i], n = nextIdx(), np = game.pairs[n];
+  if(amActive()) return screen(`<h2>סיכום התור שלכם</h2>
+      <p class="room-lead2">נלחץ משהו בטעות? אפשר ללחוץ על מילה כדי לתקן. אחר כך ${esc(pairName(np, n))} יאשרו.</p>${reviewBlock(true)}`,
+    `<button class="btn" data-r="submit">שליחה לאישור של ${esc(pairName(np, n))}</button>`);
+  return screen(`<h2>סיכום התור של ${esc(pairName(p, i))}</h2>${reviewBlock(false)}${board(i)}`,
+    `<div class="room-wait-row">⏳ ${esc(pairName(p, i))} בודקים את הסיכום${n === myIdx() ? ", ואז תתבקשו לאשר" : ""}</div>`);
+}
+function vApprove(){
+  const i = game.turn, p = game.pairs[i], n = nextIdx(), np = game.pairs[n];
+  if(amApprover()) return screen(`<h2>אישור הסיכום של ${esc(pairName(p, i))}</h2>
+      <p class="room-lead2">שומעים משהו לא הוגן? אפשר ללחוץ על מילה כדי לשנות אותה, וכולם יראו את השינוי.</p>${reviewBlock(true)}`,
+    `<button class="btn green" data-r="approve">✓ מאשרים</button>`);
+  const override = isHost() || (amActive() && !online(np.uid));
+  return screen(`<h2>סיכום התור של ${esc(pairName(p, i))}</h2>${reviewBlock(false)}${board(i)}`,
+    `<div class="room-wait-row">⏳ מחכים לאישור של ${esc(pairName(np, n))}</div>
+     ${override ? `<button class="link" data-r="approve">אישור במקומם</button>` : ""}`);
+}
+function vWinner(){
+  const i = game.winner, p = game.pairs[i] || game.pairs[0];
+  const sorted = game.pairs.map((x, k) => [x, k]).sort((a, b) => b[0].score - a[0].score);
+  return `<div class="screen">${bar()}<div class="confetti" id="confetti"></div>
+    <div class="scroll center"><div class="trophy" aria-hidden="true">🏆</div>
+      <h1 class="display turn-of">${i === myIdx() ? "ניצחתם!" : `${esc(pairName(p, i))} ניצחו!`}</h1>
+      <p style="margin:-8px 0 18px;color:var(--muted)">${esc(playerName(p, 0))} ו${esc(playerName(p, 1))}, ${p.score} נקודות</p>
+      <ol class="board">${sorted.map(([x, k], n) => `<li class="${k === i ? "now" : ""}"><span>${["🥇", "🥈", "🥉"][n] || "🎈"}</span>
+        <div class="who"><b>${esc(pairName(x, k))}</b></div><span class="pts">${x.score}</span></li>`).join("")}</ol></div>
+    <div class="footer">${isHost()
+      ? `<button class="btn" data-r="rematch">משחק חוזר עם אותם זוגות</button><button class="link" data-r="closeRoom">סגירת החדר</button>`
+      : `<div class="room-wait-row">המארח יכול להתחיל משחק חוזר</div><button class="link" data-r="home">יציאה מהחדר</button>`}</div></div>`;
+}
+
+function view(){
+  switch(ui.view){
+    case "connecting": return msgScreen("📡", "מתחברים לחדר…", "", " ");
+    case "error": return msgScreen("😕", esc(ui.msg), "");
+    case "closed": return msgScreen("🚪", "החדר נסגר", "המארח סגר את החדר");
+    case "form": return vForm();
+  }
+  if(!game) return msgScreen("📡", "מתחברים לחדר…", "", " ");
+  if(host === null) return msgScreen("🚪", "החדר נסגר", "המארח סגר את החדר");
+  switch(game.screen){
+    case "handoff": return vHandoff();
+    case "turn": return amActive() ? (T ? vTurnActive() : msgScreen("⏳", "טוען את התור…", "", " ")) : vTurnOther();
+    case "lastword": return vLastWord();
+    case "summary": return vSummary();
+    case "approve": return vApprove();
+    case "winner": return vWinner();
+    default: return vLobby();
+  }
+}
+function render(force){
+  if(!G || !G.app) return;
+  const html = view();
+  if(html === lastHTML && !force) return;
+  // לא מוחקים טקסט שהמשתמש באמצע להקליד
+  const focused = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.ri ? document.activeElement : null;
+  const sel = focused ? [focused.dataset.ri, focused.dataset.j, focused.selectionStart] : null;
+  lastHTML = html;
+  G.app.innerHTML = html;
+  if(sel){ const el = G.app.querySelector(`[data-ri="${sel[0]}"]` + (sel[1] != null ? `[data-j="${sel[1]}"]` : "")); if(el){ el.focus(); try{ el.setSelectionRange(sel[2], sel[2]); }catch(e){} } }
+  if(game && game.screen === "winner" && ui.view === "room" && confettiFor !== game.tid + ":" + game.round){ confettiFor = game.tid + ":" + game.round; G.confetti && G.confetti(); }
 }
 
 /* ---------- QR ---------- */
-function loadScript(src){
-  return new Promise((ok, bad) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = bad; document.head.appendChild(s); });
-}
+function loadScript(src){ return new Promise((ok, bad) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = bad; document.head.appendChild(s); }); }
 async function makeQR(text){
   if(!window.qrcode) await loadScript(QR_LIB);
   const q = window.qrcode(0, "M"); q.addData(text); q.make();
   return q.createSvgTag({cellSize: 6, margin: 2, scalable: true});
 }
 
-/* ---------- חלון החדר ---------- */
-let $ov = null;
-function closePanel(){ panelOpen = false; if($ov){ $ov.remove(); $ov = null; } }
-function drawPanel(){
-  if(!panelOpen) return;
-  if(!$ov){
-    $ov = document.createElement("div");
-    $ov.className = "overlay room-ov";
-    $ov.addEventListener("click", onPanelClick);
-    document.body.appendChild($ov);
-  }
-  let body;
-  if(room){
-    const url = viewUrl(room.code);
-    body = `<div class="room-qr">${qrSvg || `<span class="room-wait">טוען קוד…</span>`}</div>
-      <div class="room-code" dir="ltr">${room.code}</div>
-      <p class="room-sub">${room.viewers ? `👀 ${room.viewers} ${room.viewers === 1 ? "צופה מחובר/ת" : "צופים מחוברים"}` : "סורקים עם המצלמה, או נכנסים ללינק"}</p>
-      <button class="btn" data-rp="share">${navigator.share ? "שיתוף הלינק" : "העתקת הלינק"}</button>
-      <button class="btn plain" data-rp="close">חזרה למשחק</button>
-      <button class="link room-end" data-rp="end">סגירת החדר</button>`;
-    if(!qrSvg) makeQR(url).then(s => { qrSvg = s; drawPanel(); }).catch(() => { qrSvg = `<span class="room-wait">לא הצלחנו להציג QR, אפשר לשתף את הלינק</span>`; drawPanel(); });
-  } else {
-    body = `<p class="room-sub">${panelMsg || "פותחים חדר…"}</p>
-      ${panelMsg ? `<button class="btn" data-rp="retry">נסו שוב</button>` : ""}
-      <button class="btn plain" data-rp="close">חזרה למשחק</button>`;
-  }
-  $ov.innerHTML = `<div class="box">
-    <h2 class="display">📡 חדר צפייה</h2>
-    <p class="room-lead">כל מי שנכנס רואה את הניקוד, התור והטיימר בזמן אמת. המילה עצמה נשארת רק אצלכם.</p>
-    ${body}</div>`;
-}
-async function openPanel(){
-  panelOpen = true; panelMsg = ""; drawPanel();
-  if(room) return;
-  try{ await startRoom(); }
-  catch(e){ panelMsg = navigator.onLine === false ? "צריך חיבור לאינטרנט כדי לפתוח חדר" : "לא הצלחנו לפתוח חדר כרגע"; }
-  drawPanel();
-}
-async function onPanelClick(e){
-  const b = e.target.closest("[data-rp]");
-  if(!b){ if(e.target === $ov) closePanel(); return; }
-  const a = b.dataset.rp;
-  if(a === "close") closePanel();
-  if(a === "retry") openPanel();
-  if(a === "end" && confirm("לסגור את החדר? הצופים יתנתקו.")) endRoom();
-  if(a === "share" && room){
-    const url = viewUrl(room.code);
-    if(navigator.share){ try{ await navigator.share({title: document.title, text: "צפייה במשחק בזמן אמת", url}); }catch(err){} }
-    else { try{ await navigator.clipboard.writeText(url); b.textContent = "הועתק ✓"; }catch(err){ prompt("הלינק לחדר:", url); } }
-  }
-}
-
-/* ---------- כפתור החדר בתוך המשחק ---------- */
-function buttonHTML(){
-  if(!enabled() || !G) return "";
-  const label = room ? `📡 חדר <b dir="ltr">${room.code}</b>${room.viewers ? ` · 👀 ${room.viewers}` : ""}` : "📡 פתיחת חדר צפייה";
-  return `<button class="room-btn ${room ? "on" : ""}" data-room="open">${label}</button>`;
-}
-function refreshUI(){
-  document.querySelectorAll('[data-room="open"]').forEach(b => { b.outerHTML = buttonHTML(); });
-  drawPanel();
-}
-document.addEventListener("click", e => { if(e.target.closest('[data-room="open"]')) openPanel(); });
-
-/* ============================================================
-   צד הצופה
-   ============================================================ */
-let V = {state: undefined, host: undefined, online: null};
-function pairBoard(st, hi){
-  return `<div class="board-title"><span>ניקוד</span><span>יעד: ${st.target}</span></div>
-  <ol class="board">${(st.pairs || []).map((p, i) => `<li class="${i === hi ? "now" : ""}">
-    <div class="who"><b>${esc(p.n)}</b><small>${esc(p.a)} ו${esc(p.b)}</small></div>
-    <span class="pts">${p.s}</span></li>`).join("")}</ol>`;
-}
-function wordList(words){
-  return words.length ? `<ul class="rv-words">${words.map(w => `<li class="${w.ok ? "" : "no"}"><span class="mark">${w.ok ? "✓" : "✕"}</span><span>${w.e ? w.e + " " : ""}${esc(w.w)}</span></li>`).join("")}</ul>` : "";
-}
-function viewerBody(st){
-  const pairs = st.pairs || [], cur = pairs[st.turn] || {n: ""}, t = st.t;
-  const words = t ? (t.words || []) : [];
-  switch(st.screen){
-    case "handoff": return `<div class="center">
-      <div class="round">סבב ${st.round}</div>
-      <h1 class="display turn-of">התור של ${esc(cur.n)}</h1>
-      <div class="roles"><div class="role"><small>מסביר/ה</small><b>${esc(st.ex)}</b></div><div class="role"><small>מנחש/ת</small><b>${esc(st.gu)}</b></div></div>
-      <div class="deck-tag">${esc(st.deck || "")}</div>
-      <p class="room-sub">מתכוננים להתחיל את התור…</p>${pairBoard(st, st.turn)}</div>`;
-    case "turn": {
-      const ok = words.filter(w => w.ok).length, pct = t ? Math.max(0, t.secs / t.total * 100) : 0;
-      const cls = !t ? "" : t.secs <= 5 ? "danger" : t.secs <= 15 ? "warn" : "";
-      return `<div class="round" style="text-align:center">סבב ${st.round} · התור של ${esc(cur.n)}</div>
-      <div class="turn-top"><span class="secs">${t ? t.secs : ""}</span><div class="timer ${cls}"><i style="width:${pct}%"></i></div></div>
-      <div class="turn-meta"><span>${esc(st.ex)} מסביר/ה ל${esc(st.gu)}</span><span>✅ ${ok} &nbsp; ⏭ ${words.length - ok}</span></div>
-      <div class="rv-hidden">${t && t.paused ? "⏸<b>התור מושהה</b>" : "🤫<b>המילה מוסתרת</b><small>רק המסביר/ה רואה אותה</small>"}</div>
-      ${wordList(words.slice().reverse())}${pairBoard(st, st.turn)}`;
-    }
-    case "lastword": return `<div class="center">
-      <h1 class="display turn-of">הזמן נגמר!</h1>
-      <p style="margin:0 0 14px">המילה האחרונה פתוחה לכולם. מי ינחש ראשון?</p>
-      ${wordList(words)}${pairBoard(st, st.turn)}</div>`;
-    case "summary": return `<h2>סיכום התור של ${esc(cur.n)}</h2>
-      ${words.length ? wordList(words) : `<p class="empty">לא נענו מילים בתור הזה</p>`}
-      ${t && t.lw ? `<div class="lw-row">המילה האחרונה (${t.lw.e ? t.lw.e + " " : ""}${esc(t.lw.w)}): +1 ל${esc((pairs[t.lw.p] || {}).n)}</div>` : ""}
-      ${t ? `<div class="total"><span>נקודות בתור:</span><b>${t.pts > 0 ? "+" : ""}${t.pts}</b></div>` : ""}
-      ${pairBoard(st, st.turn)}`;
-    case "winner": {
-      const w = pairs[st.winner] || {n: "", s: 0};
-      const sorted = pairs.map((x, k) => [x, k]).sort((a, b) => b[0].s - a[0].s);
-      return `<div class="center"><div class="trophy" aria-hidden="true">🏆</div>
-      <h1 class="display turn-of">${esc(w.n)} ניצחו!</h1>
-      <p style="margin:-8px 0 18px;color:var(--muted)">${esc(w.a)} ו${esc(w.b)}, ${w.s} נקודות</p>
-      <ol class="board">${sorted.map(([x, k], n) => `<li class="${k === st.winner ? "now" : ""}"><span>${["🥇","🥈","🥉"][n] || "🎈"}</span>
-        <div class="who"><b>${esc(x.n)}</b></div><span class="pts">${x.s}</span></li>`).join("")}</ol></div>`;
-    }
-    default: return `<div class="center"><div class="rv-hidden">🎲<b>מתכוננים למשחק</b><small>המשחק יופיע כאן ברגע שיתחיל</small></div>
-      ${pairs.length ? pairBoard(st, -1) : ""}</div>`;
-  }
-}
-function viewerRender(){
-  const $app = G.app;
-  let inner;
-  if(V.host === null) inner = `<div class="center" style="justify-content:center;flex:1">
-      <div class="rv-hidden">🚪<b>החדר ${esc(viewCode)} סגור</b><small>אולי הקוד לא נכון, או שהמשחק הסתיים</small></div></div>`;
-  else if(!V.state) inner = `<div class="center"><div class="rv-hidden">📡<b>מתחברים לחדר…</b></div></div>`;
-  else inner = viewerBody(V.state);
-  $app.innerHTML = `<div class="screen">
-    <div class="room-bar"><span>📡 צופים בחדר <b dir="ltr">${esc(viewCode)}</b></span>${!V.host ? "" : V.online === false ? `<span class="room-off">הטלפון המארח לא מחובר</span>` : `<span class="room-live">● שידור חי</span>`}</div>
-    <div class="scroll">${inner}</div>
-    <div class="footer"><a class="link" href="${location.pathname}">לשחק בטלפון הזה</a></div>
-  </div>`;
-}
-async function startViewer(){
-  viewerRender();
-  // שומרים את המסך דולק בזמן צפייה
-  const keep = async () => { try{ if("wakeLock" in navigator && !document.hidden) await navigator.wakeLock.request("screen"); }catch(e){} };
-  keep(); document.addEventListener("visibilitychange", keep);
-  try{
-    const n = await getNet();
-    n.join(G.game, viewCode, (k, v) => { V[k] = v; viewerRender(); });
-  }catch(e){
-    G.app.innerHTML = `<div class="screen"><div class="scroll center" style="justify-content:center">
-      <div class="rv-hidden">📡<b>לא הצלחנו להתחבר לחדר</b><small>כדאי לבדוק את החיבור לאינטרנט</small></div></div>
-      <div class="footer"><button class="btn" onclick="location.reload()">נסו שוב</button></div></div>`;
-  }
+/* ---------- אירועים ---------- */
+function wire(){
+  G.app.addEventListener("click", e => {
+    const el = e.target.closest("[data-r]");
+    if(el && !el.disabled && A[el.dataset.r]) A[el.dataset.r](el);
+  });
+  G.app.addEventListener("input", e => {
+    const el = e.target, k = el.dataset.ri;
+    if(!k || !ui.form) return;
+    if(k === "name") ui.form.name = el.value;
+    if(k === "player") ui.form.players[+el.dataset.j].name = el.value;
+  });
+  document.addEventListener("visibilitychange", () => {
+    if(document.hidden){ if(T && !T.paused){ T.paused = true; pushTurn(); render(); } }
+    else if(ui.view === "room") wake();
+  });
 }
 
 /* ---------- עיצוב ---------- */
 const css = document.createElement("style");
 css.textContent = `
-.room-btn{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin:0 0 16px;padding:11px 14px;border:2px dashed var(--muted);border-radius:16px;background:none;color:var(--text);font-size:16px}
-.room-btn.on{border-style:solid;border-color:var(--mint);background:var(--surface)}
-.room-btn b{letter-spacing:.12em}
-.room-ov .box{gap:12px}
-.room-lead{margin:-6px 0 4px;opacity:.85;font-size:15px}
-.room-qr{background:#fff;border-radius:18px;padding:10px;width:min(240px,62vw);aspect-ratio:1;margin:0 auto;display:grid;place-items:center}
+.room-btn{display:flex;align-items:center;gap:12px;width:100%;margin:0 0 16px;padding:12px 14px;border:2px solid var(--edge);border-radius:16px;background:var(--surface);color:var(--text);font-size:16px;text-align:right}
+.room-btn .ico{font-size:26px;flex:none}
+.room-btn b{display:block;font-size:17px}
+.room-btn small{color:var(--muted);font-size:14px}
+.room-lead2{margin:-4px 0 14px;color:var(--muted);font-size:15px}
+.room-qr{background:#fff;border-radius:18px;padding:10px;width:min(220px,58vw);aspect-ratio:1;margin:0 auto;display:grid;place-items:center;border:3px solid var(--edge)}
 .room-qr svg{width:100%;height:100%;display:block}
 .room-wait{color:#1B2250;font-size:15px}
-.room-code{font-family:"Secular One",Arial,sans-serif;font-size:44px;letter-spacing:.2em;line-height:1;color:#fff}
+.room-code{font-family:"Secular One",Arial,sans-serif;font-size:40px;letter-spacing:.2em;line-height:1;margin:12px 0 4px}
 .room-sub{margin:0;color:var(--muted);font-size:15px}
-.room-ov .room-sub{color:#fff;opacity:.85}
-.room-end{color:#fff;opacity:.75}
+.room-share{margin-top:12px;font-size:18px;padding:10px 16px}
+.room-hint{background:var(--surface);border-radius:14px;padding:10px 14px;margin:0 0 10px!important}
 .room-bar{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 18px;background:var(--surface);font-size:15px;border-bottom:2px solid var(--soft)}
 .room-bar b{letter-spacing:.12em}
-.room-live{color:var(--mint);font-weight:500}
+.room-x{flex:none;background:none;border:0;color:var(--muted);font-size:18px;padding:0 0 0 2px}
+.room-me{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%}
 .room-off{color:var(--tomato);font-weight:500}
+.room-tag{display:inline-block;font-family:Rubik,Arial,sans-serif;font-size:12px;font-weight:500;background:var(--soft);border-radius:999px;padding:1px 8px;vertical-align:middle}
+.room-tag.off{background:var(--tomato);color:#fff}
+.room-wait-row{text-align:center;color:var(--muted);background:var(--surface);border-radius:14px;padding:12px}
+.room-stage{padding:10px 0 4px;flex:none}
+.card.still{animation:none}
 .rv-hidden{width:100%;background:var(--surface);border:3px dashed var(--soft);border-radius:22px;padding:22px 16px;margin:16px 0;text-align:center;font-size:44px;line-height:1.2}
 .rv-hidden b{display:block;font-size:24px;font-family:"Secular One",Arial,sans-serif;font-weight:400;margin-top:6px}
 .rv-hidden small{display:block;font-size:15px;color:var(--muted);margin-top:4px}
@@ -378,15 +804,16 @@ document.head.appendChild(css);
    ממשק למשחק
    ============================================================ */
 window.AliasRoom = {
-  // game: "alias" / "alias18"; key: מפתח השמירה של המשחק; app: האלמנט הראשי
-  attach(opts){
-    G = opts;
-    const saved = lsGet(roomKey());
-    if(!viewCode && saved && enabled()) startRoom(saved).catch(() => {});
-  },
-  isViewer: () => !!viewCode && enabled(),
-  startViewer,
-  publish,
-  button: buttonHTML
+  /* opts: game ("alias"/"alias18"), key (מפתח השמירה), app (האלמנט הראשי), decks,
+     hasKids, levels, levelNames, levelHints, levelLabel, settings() (ברירות מחדל),
+     firstPair() (הזוג הראשון במסך הזוגות), confetti() */
+  attach(opts){ G = opts; wire(); },
+  boot,
+  active: () => taken,
+  button(){
+    return `<button class="room-btn" data-room="create"><span class="ico">📡</span>
+      <span><b>משחק בחדר</b><small>כל זוג משחק מהטלפון שלו ורואה את המשחק בזמן אמת</small></span></button>`;
+  }
 };
+document.addEventListener("click", e => { if(G && e.target.closest('[data-room="create"]')) startCreate(); });
 })();
