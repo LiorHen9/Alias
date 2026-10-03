@@ -177,6 +177,7 @@ input[type=text]:focus{border-color:var(--edge);outline:none}
 </head>
 <body>
 <div id="app"></div>
+<script src="room.js"></script>
 <script>
 /* ---------- word banks (loaded from the words/ folder) ---------- */
 const DECKS = {kids:[], easy:[], medium:[], hard:[]};
@@ -222,6 +223,7 @@ function save(){
     const turn = T ? {words:T.words, card:T.card, total:T.total, left:Math.max(0,T.left), lastPair:T.lastPair} : null;
     localStorage.setItem(KEY, JSON.stringify(Object.assign({}, S, {T: turn})));
   }catch(e){}
+  if(window.AliasRoom) AliasRoom.publish();
 }
 function load(){ try{ const v = localStorage.getItem(KEY); return v ? JSON.parse(v) : null; }catch(e){ return null; } }
 
@@ -230,6 +232,7 @@ const pairName = (p,i) => p.name.trim() || `זוג ${i+1}`;
 const playerName = (p,j) => p.players[j].name.trim() || (j ? "שחקן/ית ב׳" : "שחקן/ית א׳");
 const isKidPair = p => p.players.some(x => x.kid);
 const hasAdultPair = () => S.pairs.some(p => !isKidPair(p));
+const roomBtn = () => window.AliasRoom ? AliasRoom.button() : "";
 
 function draw(p){
   let key = isKidPair(p) ? "kids" : S.settings.difficulty;
@@ -290,6 +293,7 @@ function vSetup(){
       <div class="hero"><div class="logo" aria-hidden="true">א</div>
         <div><h1 class="display">אליאס</h1><p>מסבירים בלי להגיד את המילה</p></div></div>
       ${installBanner()}
+      ${roomBtn()}
       <h2>מי משחק?</h2>
       ${pairs}
       <button class="add" data-a="addPair">+ הוספת זוג</button>
@@ -346,6 +350,7 @@ function vHandoff(){
   const deck = isKidPair(p) ? "🧸 כרטיסי תמונות" : `📝 מילים, רמה: ${LEVEL_NAMES[S.settings.difficulty]}`;
   return `<div class="screen">
     <div class="scroll center">
+      ${roomBtn()}
       <div class="round">סבב ${S.round}</div>
       <h1 class="display turn-of">התור של ${esc(pairName(p,S.turn))}</h1>
       ${notice ? `<div class="notice">${notice}</div>` : ""}
@@ -445,6 +450,7 @@ function vWinner(){
       <div class="trophy" aria-hidden="true">🏆</div>
       <h1 class="display turn-of">${esc(pairName(p,i))} ניצחו!</h1>
       <p style="margin:-8px 0 18px;color:var(--muted)">${esc(playerName(p,0))} ו${esc(playerName(p,1))}, ${p.score} נקודות</p>
+      ${roomBtn()}
       <ol class="board">${sorted.map(([x,k],n) => `<li class="${k===i?"now":""}"><span>${["🥇","🥈","🥉"][n]||"🎈"}</span>
         <div class="who"><b>${esc(pairName(x,k))}</b></div><span class="pts">${x.score}</span></li>`).join("")}</ol>
     </div>
@@ -461,6 +467,7 @@ function vResume(){
       <div class="logo" aria-hidden="true" style="margin-bottom:22px">א</div>
       <h1 class="display turn-of">יש משחק שמור</h1>
       <p style="margin:0 0 20px;color:var(--muted)">סבב ${S.round}, התור של ${esc(pairName(S.pairs[S.turn],S.turn))}</p>
+      ${roomBtn()}
       ${vBoard(-1)}
     </div>
     <div class="footer">
@@ -597,8 +604,13 @@ if("serviceWorker" in navigator && (location.protocol === "https:" || location.h
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 }
 
+/* ---------- game room (room.js) ---------- */
+if(window.AliasRoom) AliasRoom.attach({game:"alias", key:KEY, app:$app, get:() => ({S, T}),
+  pairName, playerName, isKidPair, levelNames:LEVEL_NAMES, turnPoints});
+
 /* ---------- boot ---------- */
 (async function init(){
+  if(window.AliasRoom && AliasRoom.isViewer()){ AliasRoom.startViewer(); return; }
   try{ await loadWords(); }
   catch(e){
     $app.innerHTML = `<div class="screen"><div class="scroll center" style="justify-content:center">
