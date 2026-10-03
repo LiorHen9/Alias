@@ -378,7 +378,10 @@ const A = {
     });
   },
   async closeRoom(){
-    if(!confirm("לסגור את החדר? כל הטלפונים יתנתקו מהמשחק.")) return;
+    if(!confirm("לסגור את החדר? כל הזוגות ייצאו מהחדר ויחזרו למסך הפתיחה.")) return;
+    closing = true; stopT();
+    // קודם מסמנים "נסגר" כדי שכל הטלפונים ייצאו מיד, ורק אז מוחקים את החדר
+    await act(() => true, g => { g.status = "closed"; g.screen = "closed"; });
     await db.remove("").catch(() => {});
     home();
   },
@@ -392,7 +395,7 @@ const A = {
     try{
       const d = await openDB(G.game, c);
       const g = await d.get("game");
-      if(!g) throw new Error(await inOtherGame(c) ? "other" : "nocode");
+      if(!g || g.status === "closed") throw new Error(await inOtherGame(c) ? "other" : "nocode");
       if(g.status !== "lobby" && !arr(g.pairs).some(p => p && p.uid === d.uid)) throw new Error("started");
     }catch(e){
       ui.busy = false;
@@ -405,7 +408,11 @@ const A = {
   },
   scan(){ ui.msg = ""; ui.view = "scan"; render(true); startScan(); },
   cancelScan(){ stopScan(); ui.view = "join"; render(true); },
-  exit(){ if(confirm(isHost() ? "לצאת מהחדר בטלפון הזה? החדר נשאר פתוח, ואפשר לחזור אליו דרך הלינק." : "לצאת מהחדר בטלפון הזה? אפשר לחזור דרך הלינק.")) home(); }
+  exit(){
+    // המארח שיוצא סוגר את החדר לכולם
+    if(isHost()) return A.closeRoom();
+    if(confirm("לצאת מהחדר בטלפון הזה? אפשר לחזור דרך הלינק.")) home();
+  }
 };
 // תרגום ממקלדת עברית לאותיות האנגליות שבאותו מקום, כדי שלא צריך להחליף שפה
 const HEB_KEYS = {"/":"Q","'":"W","ק":"E","ר":"R","א":"T","ט":"Y","ו":"U","ן":"I","ם":"O","פ":"P","ש":"A","ד":"S","ג":"D","כ":"F","ע":"G","י":"H","ח":"J","ל":"K","ך":"L","ז":"Z","ס":"X","ב":"C","ה":"V","נ":"B","מ":"N","צ":"M"};
@@ -548,16 +555,26 @@ async function joinRoom(pair){
   lsSet(G.key + "-room", code);
   db.presence("members/" + me + "/online");
 }
+// המארח סגר את החדר: יוצאים ממנו ואחרי רגע חוזרים למסך הפתיחה של המשחק
+let closing = false, kickTimer = 0;
+function kicked(){
+  if(closing || kickTimer) return;
+  stopT();
+  lsSet(G.key + "-room", null);
+  ui.view = "closed"; render(true);
+  buzz(200);
+  kickTimer = setTimeout(home, 4000);
+}
 // מאזינים לחדר. מחזיר אחרי שהגיע המצב הראשון
 function listen(){
   return new Promise(resolve => {
     let first = true;
-    db.on("host", v => { host = v; if(v === null && !first) { ui.view = "closed"; stopT(); } render(); });
+    db.on("host", v => { host = v; if(v === null && !first) return kicked(); render(); });
     db.on("members", v => { members = v || {}; render(); });
     db.on("turn", v => { turnLive = v; if(game && game.screen === "turn" && amActive()){ restoreT(); if(T && !T.restoredRendered){ T.restoredRendered = true; render(); } return; } render(); });
     db.on("game", v => {
       game = norm(v);
-      if(!game){ if(!first){ ui.view = "closed"; stopT(); render(); } }
+      if(!game || game.status === "closed"){ if(!first || game) return kicked(); }
       else onGame();
       if(first){ first = false; resolve(); }
     });
@@ -598,6 +615,7 @@ async function enter(c, explicit){
     if(g && !explicit && Date.now() - ((await db.get("created")) || 0) > 12 * 3600e3){ lsSet(G.key + "-room", null); location.href = location.pathname; return; }
     if(!g){ if(!explicit){ lsSet(G.key + "-room", null); location.href = location.pathname; return; } ui.view = "error"; ui.msg = await inOtherGame(code) ? otherGameMsg() : "החדר הזה לא קיים או שכבר נסגר"; return render(); }
     await listen();
+    if(kickTimer) return; // החדר נסגר בינתיים
     if(myIdx() >= 0){ ui.view = "room"; db.presence("members/" + me + "/online"); lsSet(G.key + "-room", code); }
     else if(game.status !== "lobby"){ ui.view = "error"; ui.msg = netError(new Error("started")); }
     else { ui.form = Object.assign({mode: "join"}, savedPair()); ui.view = "form"; }
@@ -868,13 +886,13 @@ function view(){
   switch(ui.view){
     case "connecting": return msgScreen("📡", "מתחברים לחדר…", "", " ");
     case "error": return msgScreen("😕", esc(ui.msg), "");
-    case "closed": return msgScreen("🚪", "החדר נסגר", "המארח סגר את החדר");
+    case "closed": return msgScreen("🚪", "המארח סגר את החדר", "חוזרים למסך הפתיחה…", `<button class="btn" data-r="home">חזרה עכשיו</button>`);
     case "form": return vForm();
     case "join": return vJoin();
     case "scan": return vScan();
   }
   if(!game) return msgScreen("📡", "מתחברים לחדר…", "", " ");
-  if(host === null) return msgScreen("🚪", "החדר נסגר", "המארח סגר את החדר");
+  if(host === null) return msgScreen("🚪", "המארח סגר את החדר", "חוזרים למסך הפתיחה…", `<button class="btn" data-r="home">חזרה עכשיו</button>`);
   switch(game.screen){
     case "handoff": return vHandoff();
     case "turn": return amActive() ? (T ? vTurnActive() : msgScreen("⏳", "טוען את התור…", "", " ")) : vTurnOther();
