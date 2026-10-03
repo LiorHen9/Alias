@@ -622,7 +622,7 @@ async function enter(c, explicit){
     render();
   }catch(e){ ui.view = "error"; ui.msg = netError(e); render(); }
 }
-// נקרא מכפתור "הצטרפות לחדר" במסך הזוגות
+// נקרא מכפתור "הצטרפות לחדר" במסך הפתיחה
 function startJoin(){
   ui.code = ""; ui.tried = ""; ui.msg = ""; ui.busy = false; ui.view = "join"; taken = true;
   history.replaceState(null, "", location.pathname + (DEV ? "?roomdev" : ""));
@@ -632,7 +632,7 @@ function savedPair(){
   try{ const s = JSON.parse(lsGet("alias-room-me")); if(s && s.players) return {name: s.name || "", players: arr(s.players).map(x => ({name: x.name || "", kid: !!x.kid}))}; }catch(e){}
   return {name: "", players: [{name: "", kid: false}, {name: "", kid: false}]};
 }
-// נקרא מכפתור במסך הזוגות של המשחק
+// נקרא מכפתור "פתיחת חדר" במסך הפתיחה
 function startCreate(){
   const p = G.firstPair && G.firstPair();
   const base = savedPair();
@@ -664,7 +664,7 @@ function screen(body, footer){
 function msgScreen(icon, title, sub, footer){
   return `<div class="screen"><div class="scroll center" style="justify-content:center">
     <div class="rv-hidden">${icon}<b>${title}</b>${sub ? `<small>${sub}</small>` : ""}</div></div>
-    <div class="footer">${footer || `<button class="btn plain" data-r="home">חזרה למשחק בטלפון אחד</button>`}</div></div>`;
+    <div class="footer">${footer || `<button class="btn plain" data-r="home">חזרה למסך הפתיחה</button>`}</div></div>`;
 }
 
 function vForm(){

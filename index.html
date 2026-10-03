@@ -85,6 +85,22 @@ input[type=text]:focus{border-color:var(--edge);outline:none}
 .install b{display:block}
 .install small{color:var(--muted);font-size:14px}
 .install .ico{font-size:26px;flex:none}
+/* home: three ways to play */
+.modes-label{display:flex;align-items:baseline;gap:8px;font-family:"Secular One",Rubik,Arial,sans-serif;font-size:18px;margin:4px 0 10px}
+.modes-label small{font-family:Rubik,Arial,sans-serif;font-size:14px;color:var(--muted)}
+.modes-sep{display:flex;align-items:center;gap:10px;color:var(--muted);margin:22px 0 14px;font-size:15px}
+.modes-sep::before,.modes-sep::after{content:"";flex:1;height:2px;background:var(--soft)}
+.mode{display:flex;align-items:center;gap:14px;width:100%;margin:0 0 12px;padding:14px;background:var(--surface);color:var(--text);border:3px solid var(--edge);border-radius:18px;box-shadow:4px 4px 0 var(--edge);text-align:right;transition:transform .06s,box-shadow .06s}
+.mode:active{transform:translate(3px,3px);box-shadow:1px 1px 0 var(--edge)}
+.mode:disabled{opacity:.5;box-shadow:none;border-color:var(--soft)}
+.mode .ico{flex:none;width:56px;height:56px;border-radius:14px;border:2px solid var(--edge);display:grid;place-items:center;font-size:28px}
+.mode.create .ico{background:var(--sun)}
+.mode.join .ico{background:var(--mint)}
+.mode.local .ico{background:var(--tomato)}
+.mode .txt{flex:1;min-width:0}
+.mode b{display:block;font-family:"Secular One",Rubik,Arial,sans-serif;font-weight:400;font-size:22px;line-height:1.2}
+.mode small{display:block;color:var(--muted);font-size:14px;margin-top:2px}
+.mode .go{flex:none;font-size:22px;color:var(--muted)}
 /* settings */
 .group{margin-bottom:22px}
 .group .label{font-weight:500;margin-bottom:8px;display:block}
@@ -217,7 +233,7 @@ let S, T = null;
 
 function newPair(){ return {id:Math.random().toString(36).slice(2,9), name:"", players:[{name:"",kid:false},{name:"",kid:false}], score:0, next:0}; }
 function freshState(){
-  return {screen:"setup", pairs:[newPair(), newPair()],
+  return {screen:"home", pairs:[newPair(), newPair()],
     settings:{time:60, target:30, skipPenalty:true, difficulty:"mixed", lastWord:true, sound:true},
     turn:0, round:1, used:{kids:[],easy:[],medium:[],hard:[]}, winner:null};
 }
@@ -235,7 +251,6 @@ const pairName = (p,i) => p.name.trim() || `זוג ${i+1}`;
 const playerName = (p,j) => p.players[j].name.trim() || (j ? "שחקן/ית ב׳" : "שחקן/ית א׳");
 const isKidPair = p => p.players.some(x => x.kid);
 const hasAdultPair = () => S.pairs.some(p => !isKidPair(p));
-const roomBtn = () => window.AliasRoom ? AliasRoom.button() : "";
 
 function draw(p){
   let key = isKidPair(p) ? "kids" : S.settings.difficulty;
@@ -272,10 +287,32 @@ window.addEventListener("pagehide", () => { if(T && S.screen === "turn") save();
 document.addEventListener("visibilitychange", () => {
   if(!S) return;
   if(document.hidden){ if(S.screen==="turn" && T && !T.paused){ T.paused = true; render(); } }
-  else if(!["setup","settings","winner","resume"].includes(S.screen)) wake(true);
+  else if(!["home","setup","settings","winner","resume"].includes(S.screen)) wake(true);
 });
 
 /* ---------- screens ---------- */
+function vHome(){
+  const room = !!window.AliasRoom;
+  const off = room ? "" : "disabled";
+  const need = room ? "" : "<small>צריך חיבור לאינטרנט</small>";
+  return `<div class="screen">
+    <div class="scroll">
+      <div class="hero"><div class="logo" aria-hidden="true">א</div>
+        <div><h1 class="display">אליאס</h1><p>מסבירים בלי להגיד את המילה</p></div></div>
+      ${installBanner()}
+      <div class="modes-label">📡 משחק בחדר <small>כל זוג משחק מהטלפון שלו</small></div>
+      <button class="mode create" data-room="create" ${off}><span class="ico" aria-hidden="true">➕</span>
+        <span class="txt"><b>פתיחת חדר</b><small>אתם המארחים. מקבלים QR וקוד לשאר הזוגות</small>${need}</span><span class="go" aria-hidden="true">‹</span></button>
+      <button class="mode join" data-room="join" ${off}><span class="ico" aria-hidden="true">📷</span>
+        <span class="txt"><b>הצטרפות לחדר</b><small>מישהו כבר פתח חדר? סורקים QR או מקלידים קוד</small>${need}</span><span class="go" aria-hidden="true">‹</span></button>
+      <div class="modes-sep">או</div>
+      <div class="modes-label">📱 משחק מקומי <small>בלי אינטרנט</small></div>
+      <button class="mode local" data-a="go" data-v="setup"><span class="ico" aria-hidden="true">🤝</span>
+        <span class="txt"><b>משחק במכשיר אחד</b><small>טלפון אחד שעובר מיד ליד בין הזוגות</small></span><span class="go" aria-hidden="true">‹</span></button>
+    </div>
+  </div>`;
+}
+
 function vSetup(){
   const pairs = S.pairs.map((p,i) => `
     <div class="pair ${isKidPair(p)?"kid":""}">
@@ -293,11 +330,8 @@ function vSetup(){
     </div>`).join("");
   return `<div class="screen">
     <div class="scroll">
-      <div class="hero"><div class="logo" aria-hidden="true">א</div>
-        <div><h1 class="display">אליאס</h1><p>מסבירים בלי להגיד את המילה</p></div></div>
-      ${installBanner()}
-      ${roomBtn()}
-      <h2>מי משחק?</h2>
+      <div class="topbar"><button class="back" data-a="go" data-v="home">→ מסך הפתיחה</button></div>
+      <h2>משחק בטלפון אחד: מי משחק?</h2>
       ${pairs}
       <button class="add" data-a="addPair">+ הוספת זוג</button>
     </div>
@@ -477,7 +511,7 @@ function vResume(){
   </div>`;
 }
 
-const VIEWS = {setup:vSetup, settings:vSettings, handoff:vHandoff, turn:vTurn, lastword:vLastWord, summary:vSummary, winner:vWinner, resume:vResume};
+const VIEWS = {home:vHome, setup:vSetup, settings:vSettings, handoff:vHandoff, turn:vTurn, lastword:vLastWord, summary:vSummary, winner:vWinner, resume:vResume};
 function render(){
   if(window.AliasRoom && AliasRoom.active()) return; // משחק בחדר מצייר את המסך בעצמו
   $app.innerHTML = VIEWS[S.screen]();
@@ -599,8 +633,8 @@ function installBanner(){
   if(isIOS) return `<div class="install"><span class="ico">📲</span><span><b>להוספה למסך הבית</b><small>בספארי: לוחצים על כפתור השיתוף ⬆️ ואז "הוספה למסך הבית"</small></span><button class="del" data-a="hideInstall" aria-label="הסתרה">✕</button></div>`;
   return "";
 }
-window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if(S && S.screen === "setup") render(); });
-window.addEventListener("appinstalled", () => { installEvt = null; if(S && S.screen === "setup") render(); });
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if(S && S.screen === "home") render(); });
+window.addEventListener("appinstalled", () => { installEvt = null; if(S && S.screen === "home") render(); });
 if("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")){
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 }
@@ -634,7 +668,8 @@ if(window.AliasRoom) AliasRoom.attach({game:"alias", key:KEY, app:$app, decks:DE
         if(T.left <= 0) S.screen = S.settings.lastWord ? "lastword" : "summary";
         else T.iv = setInterval(tick, 100);
       }
-    } else if(!["setup","settings"].includes(S.screen)) S.screen = S.screen === "winner" ? "setup" : "resume";
+    } else if(["home","setup","settings","winner"].includes(S.screen)) S.screen = "home";
+    else S.screen = "resume";
   } else S = freshState();
   render();
 })();
