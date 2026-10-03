@@ -308,6 +308,7 @@ const A = {
     if(navigator.share){ try{ await navigator.share({title: document.title, text: "הצטרפו למשחק שלנו", url}); }catch(e){} }
     else { try{ await navigator.clipboard.writeText(url); el.textContent = "הועתק ✓"; }catch(e){ prompt("הלינק לחדר:", url); } }
   },
+  toggleSettings(){ ui.settingsOpen = !ui.settingsOpen; render(); },
   start(){
     audio();
     act(g => g.status === "lobby" && g.pairs.length >= 2, g => {
@@ -566,7 +567,10 @@ function vLobby(){
       <div class="who"><b>${esc(pairName(p, i))}${p.uid === me ? ` <span class="room-tag">אתם</span>` : ""}${p.uid === host ? ` <span class="room-tag">מארח</span>` : ""}${online(p.uid) ? "" : ` <span class="room-tag off">לא מחובר</span>`}</b>
         <small>${esc(playerName(p, 0))} ו${esc(playerName(p, 1))}${isKid(p) ? " · 🧸 כרטיסי תמונות" : ""}</small></div>
       ${h && p.uid !== me ? `<button class="del" data-r="kick" data-u="${esc(p.uid)}" aria-label="הוצאה מהחדר">✕</button>` : ""}</li>`).join("")}</ol>`;
-  const settings = h ? `<h2 style="margin-top:22px">הגדרות</h2>
+  // ההגדרות מופיעות מיד מתחת ל־QR: כרטיס סיכום, ולמארח כפתור שפותח את כל ההגדרות
+  const summary = `<button class="room-set ${h ? "" : "ro"}" ${h ? `data-r="toggleSettings" aria-expanded="${!!ui.settingsOpen}"` : "disabled"}>
+      <span class="ico">⚙️</span><span><b>הגדרות המשחק</b><small>${settingsSummary(s)}</small></span>${h ? `<span class="room-set-go">${ui.settingsOpen ? "סגירה" : "שינוי"}</span>` : ""}</button>`;
+  const settings = h && ui.settingsOpen ? `<div class="room-set-panel">
     <div class="group"><span class="label">זמן לכל תור</span>${seg("time", [[30, "30 ש׳"], [45, "45 ש׳"], [60, "דקה"], [90, "90 ש׳"], [120, "2 דק׳"]], s.time)}</div>
     <div class="group"><span class="label">ניקוד לניצחון</span>
       <div class="stepper"><button data-r="target" data-v="5" aria-label="הגדלה">+</button><output>${s.target}</output><button data-r="target" data-v="-5" aria-label="הקטנה">−</button></div></div>
@@ -577,14 +581,16 @@ function vLobby(){
       ${sw("lastWord", "המילה האחרונה", "כשהזמן נגמר, כל מי שבחדר יכול לנחש")}
       ${s.lastWord ? `<p class="hint room-hint">אפשר להציג את המילה לזוגות האחרים רק כשהמילה האחרונה כבויה</p>` : sw("showWord", "הזוגות האחרים רואים את המילה", "כדי לתפוס מי שאומר חלק מהמילה")}
       ${sw("sound", "צלילים")}
-    </div>` : `<p class="room-sub" style="margin-top:14px">${settingsSummary(s)}</p>`;
+    </div>
+    <button class="btn plain" data-r="toggleSettings">סיום ההגדרות</button></div>` : "";
   const body = `<div class="center">
       <div class="room-qr">${qrSvg || `<span class="room-wait">טוען קוד…</span>`}</div>
       <div class="room-code" dir="ltr">${esc(code)}</div>
       <p class="room-sub">כל זוג סורק עם הטלפון שלו ומצטרף</p>
       <button class="btn plain room-share" data-r="share">${navigator.share ? "שיתוף הלינק" : "העתקת הלינק"}</button>
     </div>
-    <h2 style="margin-top:18px">הזוגות בחדר (${n})</h2>${pairs}${settings}`;
+    ${summary}${settings}
+    <h2 style="margin-top:18px">הזוגות בחדר (${n})</h2>${pairs}`;
   const footer = h
     ? `<button class="btn" data-r="start" ${n < 2 ? "disabled" : ""}>${n < 2 ? "מחכים לזוג נוסף…" : "יאללה, מתחילים!"}</button>
        <button class="link" data-r="editPair">עריכת הזוג שלנו</button><button class="link" data-r="closeRoom">סגירת החדר</button>`
@@ -778,6 +784,15 @@ css.textContent = `
 .room-code{font-family:"Secular One",Arial,sans-serif;font-size:40px;letter-spacing:.2em;line-height:1;margin:12px 0 4px}
 .room-sub{margin:0;color:var(--muted);font-size:15px}
 .room-share{margin-top:12px;font-size:18px;padding:10px 16px}
+.room-set{display:flex;align-items:center;gap:12px;width:100%;margin:18px 0 0;padding:12px 14px;border:2px solid var(--edge);border-radius:16px;background:var(--surface);color:var(--text);text-align:right;font-size:16px}
+.room-set.ro{border-color:var(--soft)}
+.room-set .ico{font-size:24px;flex:none}
+.room-set b{display:block;font-size:17px}
+.room-set small{display:block;color:var(--muted);font-size:14px}
+.room-set > span:nth-child(2){flex:1;min-width:0}
+.room-set-go{flex:none;font-weight:500;text-decoration:underline}
+.room-set-panel{background:var(--surface);border-radius:0 0 16px 16px;margin:-6px 0 0;padding:18px 14px 14px;border:2px solid var(--edge);border-top:0}
+.room-set-panel .seg button,.room-set-panel .stepper button,.room-set-panel .switch-row{background:var(--bg)}
 .room-hint{background:var(--surface);border-radius:14px;padding:10px 14px;margin:0 0 10px!important}
 .room-bar{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 18px;background:var(--surface);font-size:15px;border-bottom:2px solid var(--soft)}
 .room-bar b{letter-spacing:.12em}
