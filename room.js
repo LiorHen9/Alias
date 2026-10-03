@@ -392,11 +392,11 @@ const A = {
     try{
       const d = await openDB(G.game, c);
       const g = await d.get("game");
-      if(!g) throw new Error("nocode");
+      if(!g) throw new Error(await inOtherGame(c) ? "other" : "nocode");
       if(g.status !== "lobby" && !arr(g.pairs).some(p => p && p.uid === d.uid)) throw new Error("started");
     }catch(e){
       ui.busy = false;
-      ui.msg = e && e.message === "nocode" ? "לא מצאנו חדר עם הקוד הזה. כדאי לבדוק אותו מול המסך של מי שפתח את החדר." : netError(e);
+      ui.msg = e && e.message === "other" ? otherGameMsg() : e && e.message === "nocode" ? "לא מצאנו חדר עם הקוד הזה. כדאי לבדוק אותו מול המסך של מי שפתח את החדר." : netError(e);
       return render(true);
     }
     ui.busy = false;
@@ -410,6 +410,17 @@ const A = {
 // תרגום ממקלדת עברית לאותיות האנגליות שבאותו מקום, כדי שלא צריך להחליף שפה
 const HEB_KEYS = {"/":"Q","'":"W","ק":"E","ר":"R","א":"T","ט":"Y","ו":"U","ן":"I","ם":"O","פ":"P","ש":"A","ד":"S","ג":"D","כ":"F","ע":"G","י":"H","ח":"J","ל":"K","ך":"L","ז":"Z","ס":"X","ב":"C","ה":"V","נ":"B","מ":"N","צ":"M"};
 const cleanCode = s => String(s || "").replace(/./g, ch => HEB_KEYS[ch] || ch).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, CODE_LEN);
+
+/* ---------- הפרדה בין המשחקים ----------
+   חדרים של Alias ושל 18Alias שמורים בנפרד, ואי אפשר להצטרף לחדר של משחק אחד מתוך השני
+   (לא בסריקה, לא בקוד ולא בלינק). בודקים רק כדי להסביר למה החדר לא נמצא. */
+const OTHER_GAME = {alias: ["alias18", "אליאס 18+"], alias18: ["alias", "אליאס המשפחתי"]};
+const otherGameMsg = () => `זה חדר של ${(OTHER_GAME[G.game] || [, "משחק אחר"])[1]}. אי אפשר להצטרף אליו מכאן, רק מתוך אותו משחק.`;
+async function inOtherGame(c){
+  const o = OTHER_GAME[G.game];
+  if(!o) return false;
+  try{ const d = await openDB(o[0], c); return !!(await d.get("game")); }catch(e){ return false; }
+}
 
 /* ---------- סריקת QR במצלמה ---------- */
 let scanStream = null, scanTimer = 0;
@@ -472,8 +483,12 @@ function scanned(txt){
   try{ url = new URL(txt); }catch(e){}
   if(url){
     if(url.origin === location.origin && url.searchParams.get("room")){
-      // QR של חדר בגרסה האחרת של המשחק: עוברים לשם
-      if(url.pathname.replace(/index\.html$/, "") !== location.pathname.replace(/index\.html$/, "")){ stopScan(); location.href = url.href; return true; }
+      // QR של חדר במשחק השני (Alias ↔ 18Alias): אסור להצטרף מכאן
+      if(url.pathname.replace(/index\.html$/, "").toLowerCase() !== location.pathname.replace(/index\.html$/, "").toLowerCase()){
+        const m = document.getElementById("room-scan-msg");
+        if(m) m.textContent = otherGameMsg();
+        return false;
+      }
       c = cleanCode(url.searchParams.get("room"));
     }
   } else c = cleanCode(txt.trim().length === CODE_LEN ? txt : "");
@@ -581,7 +596,7 @@ async function enter(c, explicit){
     const g = await db.get("game");
     // חדר ישן שנשאר שמור בטלפון: לא נכנסים אליו אוטומטית
     if(g && !explicit && Date.now() - ((await db.get("created")) || 0) > 12 * 3600e3){ lsSet(G.key + "-room", null); location.href = location.pathname; return; }
-    if(!g){ if(!explicit){ lsSet(G.key + "-room", null); location.href = location.pathname; return; } ui.view = "error"; ui.msg = "החדר הזה לא קיים או שכבר נסגר"; return render(); }
+    if(!g){ if(!explicit){ lsSet(G.key + "-room", null); location.href = location.pathname; return; } ui.view = "error"; ui.msg = await inOtherGame(code) ? otherGameMsg() : "החדר הזה לא קיים או שכבר נסגר"; return render(); }
     await listen();
     if(myIdx() >= 0){ ui.view = "room"; db.presence("members/" + me + "/online"); lsSet(G.key + "-room", code); }
     else if(game.status !== "lobby"){ ui.view = "error"; ui.msg = netError(new Error("started")); }
