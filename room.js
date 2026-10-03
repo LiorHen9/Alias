@@ -33,6 +33,7 @@ const FIREBASE_CONFIG = {
 
 const FB_VER = "10.12.2";
 const QR_LIB = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
+const JSQR_LIB = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"; // לסריקה בדפדפנים בלי BarcodeDetector (אייפון)
 const ALPHA = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // בלי O/0, I/1, L
 const CODE_LEN = 4;
 const PLAY_SCREENS = ["handoff", "turn", "lastword", "summary", "approve", "winner"];
@@ -382,8 +383,111 @@ const A = {
     home();
   },
   home(){ home(); },
+
+  // ---- הצטרפות מתוך האפליקציה: סריקה או קוד ----
+  async joinCode(){
+    const c = ui.code || "";
+    if(c.length !== CODE_LEN){ ui.msg = `קוד החדר הוא ${CODE_LEN} תווים`; return render(true); }
+    ui.busy = true; ui.msg = ""; ui.tried = c; render();
+    try{
+      const d = await openDB(G.game, c);
+      const g = await d.get("game");
+      if(!g) throw new Error("nocode");
+      if(g.status !== "lobby" && !arr(g.pairs).some(p => p && p.uid === d.uid)) throw new Error("started");
+    }catch(e){
+      ui.busy = false;
+      ui.msg = e && e.message === "nocode" ? "לא מצאנו חדר עם הקוד הזה. כדאי לבדוק אותו מול המסך של מי שפתח את החדר." : netError(e);
+      return render(true);
+    }
+    ui.busy = false;
+    history.replaceState(null, "", location.pathname + "?room=" + c + (DEV ? "&roomdev" : ""));
+    enter(c, true);
+  },
+  scan(){ ui.msg = ""; ui.view = "scan"; render(true); startScan(); },
+  cancelScan(){ stopScan(); ui.view = "join"; render(true); },
   exit(){ if(confirm(isHost() ? "לצאת מהחדר בטלפון הזה? החדר נשאר פתוח, ואפשר לחזור אליו דרך הלינק." : "לצאת מהחדר בטלפון הזה? אפשר לחזור דרך הלינק.")) home(); }
 };
+// תרגום ממקלדת עברית לאותיות האנגליות שבאותו מקום, כדי שלא צריך להחליף שפה
+const HEB_KEYS = {"/":"Q","'":"W","ק":"E","ר":"R","א":"T","ט":"Y","ו":"U","ן":"I","ם":"O","פ":"P","ש":"A","ד":"S","ג":"D","כ":"F","ע":"G","י":"H","ח":"J","ל":"K","ך":"L","ז":"Z","ס":"X","ב":"C","ה":"V","נ":"B","מ":"N","צ":"M"};
+const cleanCode = s => String(s || "").replace(/./g, ch => HEB_KEYS[ch] || ch).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, CODE_LEN);
+
+/* ---------- סריקת QR במצלמה ---------- */
+let scanStream = null, scanTimer = 0;
+function stopScan(){
+  clearTimeout(scanTimer);
+  if(scanStream) scanStream.getTracks().forEach(t => t.stop());
+  scanStream = null;
+}
+function scanFail(denied){
+  stopScan();
+  ui.view = "join";
+  ui.msg = denied ? "אין גישה למצלמה. אפשר לאשר גישה בהגדרות הדפדפן, או פשוט להקליד את הקוד שמופיע מתחת ל־QR."
+    : "לא הצלחנו לפתוח את המצלמה. אפשר להקליד את הקוד שמופיע מתחת ל־QR.";
+  render(true);
+}
+async function startScan(){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return scanFail(false);
+  let stream;
+  try{ stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: "environment"}}, audio: false}); }
+  catch(e){ return scanFail(e && (e.name === "NotAllowedError" || e.name === "SecurityError")); }
+  if(ui.view !== "scan"){ stream.getTracks().forEach(t => t.stop()); return; }
+  scanStream = stream;
+  const v = document.getElementById("room-video");
+  if(!v) return stopScan();
+  v.srcObject = stream;
+  try{ await v.play(); }catch(e){}
+  let detect = null;
+  if("BarcodeDetector" in window){
+    try{
+      const fm = await window.BarcodeDetector.getSupportedFormats();
+      if(fm.includes("qr_code")){ const bd = new window.BarcodeDetector({formats: ["qr_code"]}); detect = async () => { const r = await bd.detect(v); return r[0] && r[0].rawValue; }; }
+    }catch(e){}
+  }
+  if(!detect){
+    try{ if(!window.jsQR) await loadScript(JSQR_LIB); }catch(e){ return scanFail(false); }
+    const cv = document.createElement("canvas"), cx = cv.getContext("2d", {willReadFrequently: true});
+    detect = async () => {
+      const w = v.videoWidth, h = v.videoHeight;
+      if(!w || !h) return null;
+      const k = Math.min(1, 720 / Math.max(w, h));
+      cv.width = Math.round(w * k); cv.height = Math.round(h * k);
+      cx.drawImage(v, 0, 0, cv.width, cv.height);
+      const r = window.jsQR(cx.getImageData(0, 0, cv.width, cv.height).data, cv.width, cv.height, {inversionAttempts: "dontInvert"});
+      return r && r.data;
+    };
+  }
+  const loop = async () => {
+    if(!scanStream) return;
+    let txt = null;
+    try{ txt = await detect(); }catch(e){}
+    if(!scanStream) return;
+    if(txt && scanned(txt)) return;
+    scanTimer = setTimeout(loop, 160);
+  };
+  loop();
+}
+// מה יצא מהסריקה: לינק לחדר (כמו ב־QR שבלובי) או קוד בלבד
+function scanned(txt){
+  let c = "", url = null;
+  try{ url = new URL(txt); }catch(e){}
+  if(url){
+    if(url.origin === location.origin && url.searchParams.get("room")){
+      // QR של חדר בגרסה האחרת של המשחק: עוברים לשם
+      if(url.pathname.replace(/index\.html$/, "") !== location.pathname.replace(/index\.html$/, "")){ stopScan(); location.href = url.href; return true; }
+      c = cleanCode(url.searchParams.get("room"));
+    }
+  } else c = cleanCode(txt.trim().length === CODE_LEN ? txt : "");
+  if(c.length !== CODE_LEN){
+    const m = document.getElementById("room-scan-msg");
+    if(m) m.textContent = "זה לא QR של חדר במשחק. סורקים את ה־QR שעל המסך של מי שפתח את החדר.";
+    return false;
+  }
+  stopScan(); buzz(80);
+  ui.code = c; ui.view = "join"; render(true);
+  A.joinCode();
+  return true;
+}
+window.addEventListener("pagehide", stopScan);
 function home(){
   lsSet(G.key + "-room", null);
   location.href = location.pathname;
@@ -464,24 +568,32 @@ function boot(){
   const saved = lsGet(G.key + "-room");
   const c = urlCode || saved;
   if(!c) return false;
-  code = c; taken = true;
-  ui.view = "connecting"; render();
-  (async () => {
-    try{
-      db = await openDB(G.game, code);
-      me = db.uid;
-      const g = await db.get("game");
-      // חדר ישן שנשאר שמור בטלפון: לא נכנסים אליו אוטומטית
-      if(g && !urlCode && Date.now() - ((await db.get("created")) || 0) > 12 * 3600e3){ lsSet(G.key + "-room", null); location.href = location.pathname; return; }
-      if(!g){ if(!urlCode){ lsSet(G.key + "-room", null); location.href = location.pathname; return; } ui.view = "error"; ui.msg = "החדר הזה לא קיים או שכבר נסגר"; return render(); }
-      await listen();
-      if(myIdx() >= 0){ ui.view = "room"; db.presence("members/" + me + "/online"); lsSet(G.key + "-room", code); }
-      else if(game.status !== "lobby"){ ui.view = "error"; ui.msg = netError(new Error("started")); }
-      else { ui.form = Object.assign({mode: "join"}, savedPair()); ui.view = "form"; }
-      render();
-    }catch(e){ ui.view = "error"; ui.msg = netError(e); render(); }
-  })();
+  taken = true;
+  enter(c, !!urlCode);
   return true;
+}
+// נכנסים לחדר. explicit: הגענו מלינק, מסריקה או מקוד (ולא מחדר ששמור בטלפון)
+async function enter(c, explicit){
+  code = c; ui.view = "connecting"; ui.msg = ""; render();
+  try{
+    db = await openDB(G.game, code);
+    me = db.uid;
+    const g = await db.get("game");
+    // חדר ישן שנשאר שמור בטלפון: לא נכנסים אליו אוטומטית
+    if(g && !explicit && Date.now() - ((await db.get("created")) || 0) > 12 * 3600e3){ lsSet(G.key + "-room", null); location.href = location.pathname; return; }
+    if(!g){ if(!explicit){ lsSet(G.key + "-room", null); location.href = location.pathname; return; } ui.view = "error"; ui.msg = "החדר הזה לא קיים או שכבר נסגר"; return render(); }
+    await listen();
+    if(myIdx() >= 0){ ui.view = "room"; db.presence("members/" + me + "/online"); lsSet(G.key + "-room", code); }
+    else if(game.status !== "lobby"){ ui.view = "error"; ui.msg = netError(new Error("started")); }
+    else { ui.form = Object.assign({mode: "join"}, savedPair()); ui.view = "form"; }
+    render();
+  }catch(e){ ui.view = "error"; ui.msg = netError(e); render(); }
+}
+// נקרא מכפתור "הצטרפות לחדר" במסך הזוגות
+function startJoin(){
+  ui.code = ""; ui.tried = ""; ui.msg = ""; ui.busy = false; ui.view = "join"; taken = true;
+  history.replaceState(null, "", location.pathname + (DEV ? "?roomdev" : ""));
+  render(true);
 }
 function savedPair(){
   try{ const s = JSON.parse(lsGet("alias-room-me")); if(s && s.players) return {name: s.name || "", players: arr(s.players).map(x => ({name: x.name || "", kid: !!x.kid}))}; }catch(e){}
@@ -524,7 +636,7 @@ function msgScreen(icon, title, sub, footer){
 
 function vForm(){
   const f = ui.form, title = {create: "משחק בחדר", join: `הצטרפות לחדר ${esc(code)}`, edit: "עריכת הזוג שלנו"}[f.mode];
-  const lead = {create: "כל זוג משחק מהטלפון שלו. קודם, מי אתם? אחר כך יופיע QR שהזוגות האחרים סורקים כדי להצטרף.",
+  const lead = {create: "כל זוג משחק מהטלפון שלו. קודם, מי אתם? אחר כך יופיעו QR וקוד, והזוגות האחרים מצטרפים איתם.",
     join: "מי אתם? הזוג שלכם ישחק מהטלפון הזה.", edit: ""}[f.mode];
   return `<div class="screen"><div class="scroll">
     <h2>${title}</h2>${lead ? `<p class="room-lead2">${lead}</p>` : ""}
@@ -542,6 +654,31 @@ function vForm(){
     <button class="btn" data-r="submitForm" ${ui.busy ? "disabled" : ""}>${ui.busy ? "רגע…" : {create: "פתיחת החדר", join: "הצטרפות למשחק", edit: "שמירה"}[f.mode]}</button>
     <button class="link" data-r="cancelForm">ביטול</button>
   </div></div>`;
+}
+
+function vJoin(){
+  const c = ui.code || "";
+  return `<div class="screen"><div class="scroll">
+    <h2>הצטרפות לחדר</h2>
+    <p class="room-lead2">מי שפתח את החדר רואה אצלו QR וקוד. סורקים את ה־QR, או מקלידים את הקוד.</p>
+    <button class="room-btn room-scan" data-r="scan" ${ui.busy ? "disabled" : ""}><span class="ico">📷</span>
+      <span><b>סריקת QR</b><small>נפתחת המצלמה של הטלפון</small></span></button>
+    <div class="room-or"><span>או</span></div>
+    <label class="label" for="room-code-in">קוד החדר</label>
+    <input id="room-code-in" class="room-code-in" type="text" data-ri="code" value="${esc(c)}" placeholder="${"•".repeat(CODE_LEN)}"
+      maxlength="${CODE_LEN + 4}" dir="ltr" inputmode="text" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="go">
+    ${ui.msg ? `<div class="notice">${esc(ui.msg)}</div>` : ""}
+  </div><div class="footer">
+    <button class="btn" data-r="joinCode" ${ui.busy || c.length !== CODE_LEN ? "disabled" : ""}>${ui.busy ? "מחפשים את החדר…" : "הצטרפות"}</button>
+    <button class="link" data-r="home">ביטול</button>
+  </div></div>`;
+}
+function vScan(){
+  return `<div class="screen"><div class="scroll center">
+    <h2>סריקת QR</h2>
+    <div class="room-cam"><video id="room-video" playsinline muted autoplay></video><i class="room-cam-frame" aria-hidden="true"></i></div>
+    <p class="room-sub" id="room-scan-msg" aria-live="polite">מכוונים את המצלמה ל־QR שעל המסך של מי שפתח את החדר</p>
+  </div><div class="footer"><button class="btn plain" data-r="cancelScan">הקלדת קוד במקום</button></div></div>`;
 }
 
 function seg(k, opts, val){
@@ -586,7 +723,7 @@ function vLobby(){
   const body = `<div class="center">
       <div class="room-qr">${qrSvg || `<span class="room-wait">טוען קוד…</span>`}</div>
       <div class="room-code" dir="ltr">${esc(code)}</div>
-      <p class="room-sub">כל זוג סורק עם הטלפון שלו ומצטרף</p>
+      <p class="room-sub">כל זוג סורק עם הטלפון שלו, או מקליד את הקוד ב״הצטרפות לחדר״</p>
       <button class="btn plain room-share" data-r="share">${navigator.share ? "שיתוף הלינק" : "העתקת הלינק"}</button>
     </div>
     ${summary}${settings}
@@ -718,6 +855,8 @@ function view(){
     case "error": return msgScreen("😕", esc(ui.msg), "");
     case "closed": return msgScreen("🚪", "החדר נסגר", "המארח סגר את החדר");
     case "form": return vForm();
+    case "join": return vJoin();
+    case "scan": return vScan();
   }
   if(!game) return msgScreen("📡", "מתחברים לחדר…", "", " ");
   if(host === null) return msgScreen("🚪", "החדר נסגר", "המארח סגר את החדר");
@@ -764,6 +903,21 @@ function wire(){
     if(k === "name") ui.form.name = el.value;
     if(k === "player") ui.form.players[+el.dataset.j].name = el.value;
   });
+  // שדה הקוד: אותיות גדולות, עם תרגום ממקלדת עברית, ונכנסים לבד כשהקוד מלא
+  G.app.addEventListener("input", e => {
+    const el = e.target;
+    if(el.dataset.ri !== "code") return;
+    const c = cleanCode(el.value);
+    if(el.value !== c) el.value = c;
+    ui.code = c;
+    // בלי לצייר מחדש בכל הקשה, כדי שהמקלדת לא תקפוץ
+    if(ui.msg){ ui.msg = ""; render(); }
+    else { const b = G.app.querySelector('[data-r="joinCode"]'); if(b) b.disabled = c.length !== CODE_LEN; }
+    if(c.length === CODE_LEN && c !== ui.tried && !ui.busy) A.joinCode();
+  });
+  G.app.addEventListener("keydown", e => {
+    if(e.key === "Enter" && e.target.dataset && e.target.dataset.ri === "code" && !ui.busy){ e.preventDefault(); A.joinCode(); }
+  });
   document.addEventListener("visibilitychange", () => {
     if(document.hidden){ if(T && !T.paused){ T.paused = true; pushTurn(); render(); } }
     else if(ui.view === "room") wake();
@@ -777,6 +931,21 @@ css.textContent = `
 .room-btn .ico{font-size:26px;flex:none}
 .room-btn b{display:block;font-size:17px}
 .room-btn small{color:var(--muted);font-size:14px}
+.room-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 16px}
+.room-btns-title{grid-column:1/-1;font-family:"Secular One",Arial,sans-serif;font-size:18px}
+.room-btns-title small{font-family:Rubik,Arial,sans-serif;font-size:14px;color:var(--muted);margin-inline-start:6px}
+.room-btns .room-btn{margin:0;padding:12px;gap:6px;flex-direction:column;align-items:flex-start}
+.room-btns .room-btn .ico{font-size:22px}
+.room-btns .room-btn b{font-size:16px}
+.room-btns .room-btn small{display:block;font-size:13px}
+.room-scan{margin:0}
+.room-or{display:flex;align-items:center;gap:10px;color:var(--muted);margin:18px 0 12px;font-size:15px}
+.room-or:before,.room-or:after{content:"";flex:1;height:2px;background:var(--soft)}
+.room-code-in{display:block;width:100%;box-sizing:border-box;font-family:"Secular One",Arial,sans-serif;font-size:36px;letter-spacing:.3em;text-align:center;text-transform:uppercase;padding:10px 12px 10px calc(12px + .3em);margin-top:6px;border:3px solid var(--edge);border-radius:16px;background:var(--surface);color:var(--text)}
+.room-code-in::placeholder{color:var(--soft)}
+.room-cam{position:relative;width:min(320px,80vw);aspect-ratio:1;border-radius:22px;overflow:hidden;background:#111;margin:6px auto 14px;border:3px solid var(--edge)}
+.room-cam video{width:100%;height:100%;object-fit:cover;display:block}
+.room-cam-frame{position:absolute;inset:16%;border:4px solid #fff;border-radius:18px;box-shadow:0 0 0 999px rgba(0,0,0,.35)}
 .room-lead2{margin:-4px 0 14px;color:var(--muted);font-size:15px}
 .room-qr{background:#fff;border-radius:18px;padding:10px;width:min(220px,58vw);aspect-ratio:1;margin:0 auto;display:grid;place-items:center;border:3px solid var(--edge)}
 .room-qr svg{width:100%;height:100%;display:block}
@@ -826,9 +995,16 @@ window.AliasRoom = {
   boot,
   active: () => taken,
   button(){
-    return `<button class="room-btn" data-room="create"><span class="ico">📡</span>
-      <span><b>משחק בחדר</b><small>כל זוג משחק מהטלפון שלו ורואה את המשחק בזמן אמת</small></span></button>`;
+    return `<div class="room-btns">
+      <div class="room-btns-title">📡 משחק בחדר <small>כל זוג משחק מהטלפון שלו</small></div>
+      <button class="room-btn" data-room="create"><span class="ico">➕</span><span><b>פתיחת חדר</b><small>מקבלים QR וקוד</small></span></button>
+      <button class="room-btn" data-room="join"><span class="ico">📷</span><span><b>הצטרפות לחדר</b><small>סריקה או קוד</small></span></button>
+    </div>`;
   }
 };
-document.addEventListener("click", e => { if(G && e.target.closest('[data-room="create"]')) startCreate(); });
+document.addEventListener("click", e => {
+  if(!G) return;
+  if(e.target.closest('[data-room="create"]')) startCreate();
+  else if(e.target.closest('[data-room="join"]')) startJoin();
+});
 })();
