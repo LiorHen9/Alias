@@ -14,7 +14,15 @@
 /* ---- הגדרות Firebase: להדביק כאן את firebaseConfig מהקונסולה ----
    Project settings → General → Your apps → Web app → SDK setup (Config)
    כל עוד זה null, כפתור החדר לא מוצג והמשחק עובד בדיוק כמו קודם. */
-const FIREBASE_CONFIG = null;
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAwl2XTaeciovpe8fYig5xaDQgM01twLAE",
+  authDomain: "alias-7214e.firebaseapp.com",
+  databaseURL: "https://alias-7214e-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "alias-7214e",
+  storageBucket: "alias-7214e.firebasestorage.app",
+  messagingSenderId: "201241835895",
+  appId: "1:201241835895:web:f01cb3e40214bc597d8972"
+};
 
 const FB_VER = "10.12.2";
 const QR_LIB = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
