@@ -310,6 +310,17 @@ const A = {
     else { try{ await navigator.clipboard.writeText(url); el.textContent = "הועתק ✓"; }catch(e){ prompt("הלינק לחדר:", url); } }
   },
   toggleSettings(){ ui.settingsOpen = !ui.settingsOpen; render(); },
+  // ---- הגדרות תוך כדי משחק (מארח) ----
+  liveSettings(){ ui.liveSet = !ui.liveSet; render(); },
+  noop(){},
+  liveToggle(el){
+    const k = el.dataset.k;
+    act(g => g.status === "play" && isHost(), g => {
+      const s = g.settings;
+      if(k === "showWord"){ s.showWord = !showWordOn(s); if(s.showWord) s.lastWord = false; }
+      if(k === "lastWord"){ s.lastWord = !s.lastWord; if(s.lastWord) s.showWord = false; }
+    });
+  },
   start(){
     audio();
     act(g => g.status === "lobby" && g.pairs.length >= 2, g => {
@@ -396,7 +407,6 @@ const A = {
       const d = await openDB(G.game, c);
       const g = await d.get("game");
       if(!g || g.status === "closed") throw new Error(await inOtherGame(c) ? "other" : "nocode");
-      if(g.status !== "lobby" && !arr(g.pairs).some(p => p && p.uid === d.uid)) throw new Error("started");
     }catch(e){
       ui.busy = false;
       ui.msg = e && e.message === "other" ? otherGameMsg() : e && e.message === "nocode" ? "לא מצאנו חדר עם הקוד הזה. כדאי לבדוק אותו מול המסך של מי שפתח את החדר." : netError(e);
@@ -411,7 +421,29 @@ const A = {
   exit(){
     // המארח שיוצא סוגר את החדר לכולם
     if(isHost()) return A.closeRoom();
-    if(confirm("לצאת מהחדר בטלפון הזה? אפשר לחזור דרך הלינק.")) home();
+    if(!confirm("לצאת מהחדר? אפשר לחזור בכפתור ״חזרה לחדר״ במסך הפתיחה.")) return;
+    lsSet(G.key + "-left", JSON.stringify({code, t: Date.now()}));
+    home();
+  },
+  // טלפון חדש (או דפדפן אחר) לוקח את המקום של זוג שלא מחובר
+  async reclaim(el){
+    const old = el.dataset.u, i = game.pairs.findIndex(p => p.uid === old);
+    if(i < 0 || old === host || online(old)) return render(true);
+    if(!confirm(`אתם ${pairName(game.pairs[i], i)}? הטלפון הזה ימשיך לשחק במקומכם מאותה נקודה.`)) return;
+    ui.busy = true; ui.msg = ""; render();
+    try{
+      await db.set("members/" + me, {online: true});
+      const ok = await act(g => g.status === "play" && g.pairs.some(p => p.uid === old) && !g.pairs.some(p => p.uid === me),
+        g => { g.pairs.find(p => p.uid === old).uid = me; });
+      if(!ok) throw new Error("reclaim");
+      db.presence("members/" + me + "/online");
+      lsSet(G.key + "-room", code); lsSet(G.key + "-left", null);
+      ui.view = "room";
+    }catch(e){
+      db.remove("members/" + me).catch(() => {});
+      ui.msg = e && e.message === "reclaim" ? "לא הצלחנו לחזור לזוג הזה. אולי הוא כבר חזר לשחק מטלפון אחר." : netError(e);
+    }
+    ui.busy = false; render(true);
   }
 };
 // תרגום ממקלדת עברית לאותיות האנגליות שבאותו מקום, כדי שלא צריך להחליף שפה
@@ -533,7 +565,7 @@ async function createRoom(pair){
     me = d.uid;
     if(await d.get("host")) continue;
     try{ await d.set("host", me); }catch(e){ continue; }
-    db = d; code = c; pair.uid = me;
+    db = d; code = c; pair.uid = me; lsSet(G.key + "-left", null);
     await db.set("created", Date.now());
     await db.set("members/" + me, {online: true});
     await db.set("game", {v: 2, status: "lobby", screen: "lobby", settings: defaultSettings(), pairs: [pair],
@@ -560,7 +592,7 @@ let closing = false, kickTimer = 0;
 function kicked(){
   if(closing || kickTimer) return;
   stopT();
-  lsSet(G.key + "-room", null);
+  lsSet(G.key + "-room", null); lsSet(G.key + "-left", null);
   ui.view = "closed"; render(true);
   buzz(200);
   kickTimer = setTimeout(home, 4000);
@@ -590,7 +622,7 @@ function onGame(){
     if(lastScreenKey && ((game.screen === "handoff" && amActive()) || (game.screen === "approve" && amApprover()))){ audio(); beep(660, 0.12); buzz([120, 60, 120]); }
     lastScreenKey = key;
   }
-  if(ui.view === "room" && myIdx() < 0 && game.status !== "lobby"){ ui.view = "error"; ui.msg = "הזוג שלך כבר לא נמצא בחדר הזה"; }
+  if(ui.view === "room" && myIdx() < 0 && game.status !== "lobby"){ ui.view = "error"; ui.msg = "הזוג שלכם ממשיך לשחק מטלפון אחר"; lsSet(G.key + "-room", null); }
   if(ui.view === "room" && myIdx() < 0 && game.status === "lobby"){ ui.view = "error"; ui.msg = "המארח הוציא את הזוג שלך מהחדר"; lsSet(G.key + "-room", null); }
   render();
 }
@@ -613,14 +645,26 @@ async function enter(c, explicit){
     const g = await db.get("game");
     // חדר ישן שנשאר שמור בטלפון: לא נכנסים אליו אוטומטית
     if(g && !explicit && Date.now() - ((await db.get("created")) || 0) > 12 * 3600e3){ lsSet(G.key + "-room", null); location.href = location.pathname; return; }
-    if(!g){ if(!explicit){ lsSet(G.key + "-room", null); location.href = location.pathname; return; } ui.view = "error"; ui.msg = await inOtherGame(code) ? otherGameMsg() : "החדר הזה לא קיים או שכבר נסגר"; return render(); }
+    if(!g){ lsSet(G.key + "-left", null); if(!explicit){ lsSet(G.key + "-room", null); location.href = location.pathname; return; } ui.view = "error"; ui.msg = await inOtherGame(code) ? otherGameMsg() : "החדר הזה לא קיים או שכבר נסגר"; return render(); }
     await listen();
     if(kickTimer) return; // החדר נסגר בינתיים
-    if(myIdx() >= 0){ ui.view = "room"; db.presence("members/" + me + "/online"); lsSet(G.key + "-room", code); }
-    else if(game.status !== "lobby"){ ui.view = "error"; ui.msg = netError(new Error("started")); }
+    if(myIdx() >= 0){ ui.view = "room"; db.presence("members/" + me + "/online"); lsSet(G.key + "-room", code); lsSet(G.key + "-left", null); }
+    else if(game.status !== "lobby"){ members = (await db.get("members")) || members; ui.view = "reclaim"; }
     else { ui.form = Object.assign({mode: "join"}, savedPair()); ui.view = "form"; }
     render();
   }catch(e){ ui.view = "error"; ui.msg = netError(e); render(); }
+}
+// חדר שיצאו ממנו בכפתור ✕ (פחות מ־12 שעות): אפשר לחזור אליו ממסך הפתיחה
+function leftRoom(){
+  try{ const l = JSON.parse(lsGet(G.key + "-left")); if(l && l.code && Date.now() - l.t < 12 * 3600e3) return l.code; }catch(e){}
+  return "";
+}
+function rejoin(el){
+  const c = cleanCode(el && el.dataset.c) || leftRoom();
+  if(c.length !== CODE_LEN) return;
+  taken = true;
+  history.replaceState(null, "", location.pathname + "?room=" + c + (DEV ? "&roomdev" : ""));
+  enter(c, true);
 }
 // נקרא מכפתור "הצטרפות לחדר" במסך הפתיחה
 function startJoin(){
@@ -648,9 +692,22 @@ function startCreate(){
    ============================================================ */
 function bar(){
   const p = game && game.pairs[myIdx()];
+  const live = isHost() && game && game.status === "play";
   return `<div class="room-bar"><span>📡 חדר <b dir="ltr">${esc(code)}</b></span>
     ${!connected ? `<span class="room-off">אין חיבור…</span>` : p ? `<span class="room-me">${esc(pairName(p, myIdx()))}</span>` : ""}
-    <button class="room-x" data-r="exit" aria-label="יציאה מהחדר">✕</button></div>`;
+    <span class="room-acts">${live ? `<button class="room-x" data-r="liveSettings" aria-label="הגדרות המשחק">⚙️</button>` : ""}<button class="room-x" data-r="exit" aria-label="יציאה מהחדר">✕</button></span></div>`;
+}
+// חלונית ההגדרות שהמארח יכול לשנות באמצע המשחק
+function liveSheet(){
+  if(!ui.liveSet || ui.view !== "room" || !game || game.status !== "play" || !isHost()) return "";
+  const s = game.settings, see = showWordOn(s);
+  const row = (k, on, title, sub) => `<div class="switch-row"><div>${title}${sub ? `<small>${sub}</small>` : ""}</div>
+    <button class="switch" role="switch" aria-checked="${on}" aria-label="${title}" data-r="liveToggle" data-k="${k}"></button></div>`;
+  return `<div class="room-sheet-bg" data-r="liveSettings"><div class="room-sheet" data-r="noop" role="dialog" aria-label="הגדרות המשחק">
+    <h2>הגדרות תוך כדי משחק</h2>
+    ${row("showWord", see, "הזוגות האחרים רואים את המילה", s.lastWord ? "הפעלה תכבה את ״המילה האחרונה״" : "השינוי חל מיד, גם באמצע תור")}
+    ${row("lastWord", !!s.lastWord, "המילה האחרונה", see ? "הפעלה תסתיר את המילה מהזוגות האחרים" : "כשהזמן נגמר, כל מי שבחדר יכול לנחש")}
+    <button class="btn plain" data-r="liveSettings">סגירה</button></div></div>`;
 }
 function board(hi){
   return `<div class="board-title"><span>ניקוד</span><span>יעד: ${game.settings.target}</span></div>
@@ -712,6 +769,21 @@ function vScan(){
     <div class="room-cam"><video id="room-video" playsinline muted autoplay></video><i class="room-cam-frame" aria-hidden="true"></i></div>
     <p class="room-sub" id="room-scan-msg" aria-live="polite">מכוונים את המצלמה ל־QR שעל המסך של מי שפתח את החדר</p>
   </div><div class="footer"><button class="btn plain" data-r="cancelScan">הקלדת קוד במקום</button></div></div>`;
+}
+
+// נכנסו לחדר שהמשחק בו כבר התחיל: בוחרים את הזוג שלנו מבין הזוגות שלא מחוברים
+function vReclaim(){
+  if(!game) return msgScreen("📡", "מתחברים לחדר…", "", " ");
+  const free = game.pairs.map((p, i) => [p, i]).filter(([p]) => p.uid !== host && !online(p.uid));
+  const list = free.map(([p, i]) => `<button class="room-btn" data-r="reclaim" data-u="${esc(p.uid)}" ${ui.busy ? "disabled" : ""}><span class="ico">👥</span>
+      <span><b>${esc(pairName(p, i))}</b><small>${esc(playerName(p, 0))} ו${esc(playerName(p, 1))} · ${p.score} נקודות</small></span></button>`).join("");
+  return `<div class="screen"><div class="scroll">
+    <h2>המשחק בחדר ${esc(code)} כבר התחיל</h2>
+    ${free.length
+      ? `<p class="room-lead2">יצאתם מהמשחק? בוחרים את הזוג שלכם, והטלפון הזה ימשיך לשחק בדיוק מאותה נקודה.</p>${list}`
+      : `<p class="room-lead2">אפשר לחזור רק לזוג שלא מחובר כרגע, וכל הזוגות בחדר מחוברים. אם הזוג שלכם עדיין פתוח בטלפון אחר, סוגרים שם את המשחק, וכעבור כמה שניות הוא יופיע כאן.</p>`}
+    ${ui.msg ? `<div class="notice">${esc(ui.msg)}</div>` : ""}
+  </div><div class="footer"><button class="btn plain" data-r="home">חזרה למסך הפתיחה</button></div></div>`;
 }
 
 function seg(k, opts, val){
@@ -890,6 +962,7 @@ function view(){
     case "form": return vForm();
     case "join": return vJoin();
     case "scan": return vScan();
+    case "reclaim": return vReclaim();
   }
   if(!game) return msgScreen("📡", "מתחברים לחדר…", "", " ");
   if(host === null) return msgScreen("🚪", "המארח סגר את החדר", "חוזרים למסך הפתיחה…", `<button class="btn" data-r="home">חזרה עכשיו</button>`);
@@ -905,7 +978,7 @@ function view(){
 }
 function render(force){
   if(!G || !G.app) return;
-  const html = view();
+  const html = view() + liveSheet();
   if(html === lastHTML && !force) return;
   // לא מוחקים טקסט שהמשתמש באמצע להקליד
   const focused = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.ri ? document.activeElement : null;
@@ -998,6 +1071,11 @@ css.textContent = `
 .room-hint{background:var(--surface);border-radius:14px;padding:10px 14px;margin:0 0 10px!important}
 .room-bar{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 18px;background:var(--surface);font-size:15px;border-bottom:2px solid var(--soft)}
 .room-bar b{letter-spacing:.12em}
+.room-acts{flex:none;display:flex;gap:12px;align-items:center}
+.room-sheet-bg{position:fixed;inset:0;z-index:6;background:rgba(18,23,58,.55);display:flex;align-items:flex-end;justify-content:center}
+.room-sheet{width:100%;max-width:520px;box-sizing:border-box;background:var(--bg);color:var(--text);border:3px solid var(--edge);border-bottom:0;border-radius:22px 22px 0 0;padding:18px 16px calc(16px + env(safe-area-inset-bottom))}
+.room-sheet h2{margin:0 0 12px}
+.mode.rejoin .ico{background:var(--sun)}
 .room-x{flex:none;background:none;border:0;color:var(--muted);font-size:18px;padding:0 0 0 2px}
 .room-me{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%}
 .room-off{color:var(--tomato);font-weight:500}
@@ -1027,6 +1105,12 @@ window.AliasRoom = {
   attach(opts){ G = opts; wire(); },
   boot,
   active: () => taken,
+  // כפתור "חזרה לחדר" למסך הפתיחה, רק אם יצאו מחדר לאחרונה
+  rejoinButton(){
+    const c = leftRoom();
+    return c ? `<button class="mode rejoin" data-room="rejoin" data-c="${esc(c)}"><span class="ico" aria-hidden="true">↩️</span>
+      <span class="txt"><b>חזרה לחדר <span dir="ltr">${esc(c)}</span></b><small>יצאתם בטעות? ממשיכים מאותה נקודה</small></span><span class="go" aria-hidden="true">‹</span></button>` : "";
+  },
   button(){
     return `<div class="room-btns">
       <div class="room-btns-title">📡 משחק בחדר <small>כל זוג משחק מהטלפון שלו</small></div>
@@ -1039,5 +1123,6 @@ document.addEventListener("click", e => {
   if(!G) return;
   if(e.target.closest('[data-room="create"]')) startCreate();
   else if(e.target.closest('[data-room="join"]')) startJoin();
+  else if(e.target.closest('[data-room="rejoin"]')) rejoin(e.target.closest('[data-room="rejoin"]'));
 });
 })();

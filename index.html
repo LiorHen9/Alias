@@ -301,6 +301,7 @@ function vHome(){
         <div><h1 class="display">אליאס</h1><p>מסבירים בלי להגיד את המילה</p></div></div>
       ${installBanner()}
       <div class="modes-label">📡 משחק בחדר <small>כל זוג משחק מהטלפון שלו</small></div>
+      ${room && AliasRoom.rejoinButton ? AliasRoom.rejoinButton() : ""}
       <button class="mode create" data-room="create" ${off}><span class="ico" aria-hidden="true">➕</span>
         <span class="txt"><b>פתיחת חדר</b><small>אתם המארחים. מקבלים QR וקוד לשאר הזוגות</small>${need}</span><span class="go" aria-hidden="true">‹</span></button>
       <button class="mode join" data-room="join" ${off}><span class="ico" aria-hidden="true">📷</span>
