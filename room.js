@@ -425,25 +425,43 @@ const A = {
     lsSet(G.key + "-left", JSON.stringify({code, t: Date.now()}));
     home();
   },
-  // טלפון חדש (או דפדפן אחר) לוקח את המקום של זוג שלא מחובר
+  // טלפון חדש (או דפדפן אחר) מבקש לקחת את המקום של זוג שלא מחובר. המארח מאשר
   async reclaim(el){
     const old = el.dataset.u, i = game.pairs.findIndex(p => p.uid === old);
     if(i < 0 || old === host || online(old)) return render(true);
-    if(!confirm(`אתם ${pairName(game.pairs[i], i)}? הטלפון הזה ימשיך לשחק במקומכם מאותה נקודה.`)) return;
-    ui.busy = true; ui.msg = ""; render();
+    if(!confirm(`אתם ${pairName(game.pairs[i], i)}? נשלח למארח בקשה לאשר שהטלפון הזה ימשיך לשחק במקומכם.`)) return;
+    ui.busy = true; ui.msg = ""; ui.reqFor = old; render();
     try{
       await db.set("members/" + me, {online: true});
       const ok = await act(g => g.status === "play" && g.pairs.some(p => p.uid === old) && !g.pairs.some(p => p.uid === me),
-        g => { g.pairs.find(p => p.uid === old).uid = me; });
+        g => { g.requests = g.requests || {}; g.requests[me] = {pair: old, t: Date.now()}; });
       if(!ok) throw new Error("reclaim");
       db.presence("members/" + me + "/online");
-      lsSet(G.key + "-room", code); lsSet(G.key + "-left", null);
-      ui.view = "room";
     }catch(e){
+      ui.reqFor = null;
       db.remove("members/" + me).catch(() => {});
-      ui.msg = e && e.message === "reclaim" ? "לא הצלחנו לחזור לזוג הזה. אולי הוא כבר חזר לשחק מטלפון אחר." : netError(e);
+      ui.msg = e && e.message === "reclaim" ? "לא הצלחנו לבקש לחזור לזוג הזה. אולי הוא כבר חזר לשחק מטלפון אחר." : netError(e);
     }
     ui.busy = false; render(true);
+  },
+  async cancelReclaim(){
+    ui.reqFor = null;
+    await act(g => !!(g.requests && g.requests[me]), g => { delete g.requests[me]; });
+    db.remove("members/" + me).catch(() => {});
+    render(true);
+  },
+  // המארח מאשר או דוחה בקשת חזרה
+  grant(el){
+    const uid = el.dataset.u;
+    act(g => isHost() && !!(g.requests && g.requests[uid]), g => {
+      const r = g.requests[uid], p = g.pairs.find(x => x.uid === r.pair);
+      if(p && p.uid !== host && !g.pairs.some(x => x.uid === uid)) p.uid = uid;
+      delete g.requests[uid];
+    });
+  },
+  deny(el){
+    const uid = el.dataset.u;
+    act(g => isHost() && !!(g.requests && g.requests[uid]), g => { delete g.requests[uid]; });
   }
 };
 // תרגום ממקלדת עברית לאותיות האנגליות שבאותו מקום, כדי שלא צריך להחליף שפה
@@ -622,6 +640,14 @@ function onGame(){
     if(lastScreenKey && ((game.screen === "handoff" && amActive()) || (game.screen === "approve" && amApprover()))){ audio(); beep(660, 0.12); buzz([120, 60, 120]); }
     lastScreenKey = key;
   }
+  if(ui.view === "reclaim" && myIdx() >= 0){
+    ui.view = "room"; ui.reqFor = null; ui.msg = "";
+    db.presence("members/" + me + "/online"); lsSet(G.key + "-room", code); lsSet(G.key + "-left", null);
+  }
+  if(ui.view === "reclaim" && ui.reqFor && !ui.busy && !(game.requests && game.requests[me])){
+    ui.reqFor = null; ui.msg = "המארח לא אישר את החזרה";
+    db.remove("members/" + me).catch(() => {});
+  }
   if(ui.view === "room" && myIdx() < 0 && game.status !== "lobby"){ ui.view = "error"; ui.msg = "הזוג שלכם ממשיך לשחק מטלפון אחר"; lsSet(G.key + "-room", null); }
   if(ui.view === "room" && myIdx() < 0 && game.status === "lobby"){ ui.view = "error"; ui.msg = "המארח הוציא את הזוג שלך מהחדר"; lsSet(G.key + "-room", null); }
   render();
@@ -696,6 +722,21 @@ function bar(){
   return `<div class="room-bar"><span>📡 חדר <b dir="ltr">${esc(code)}</b></span>
     ${!connected ? `<span class="room-off">אין חיבור…</span>` : p ? `<span class="room-me">${esc(pairName(p, myIdx()))}</span>` : ""}
     <span class="room-acts">${live ? `<button class="room-x" data-r="liveSettings" aria-label="הגדרות המשחק">⚙️</button>` : ""}<button class="room-x" data-r="exit" aria-label="יציאה מהחדר">✕</button></span></div>`;
+}
+// בקשה של טלפון אחר לחזור לזוג: המארח מאשר או דוחה
+function requestSheet(){
+  if(ui.view !== "room" || !game || game.status !== "play" || !isHost() || !game.requests) return "";
+  if(game.screen === "turn" && amActive()) return ""; // לא מפריעים למארח באמצע התור שלו
+  const uid = Object.keys(game.requests)[0];
+  if(!uid) return "";
+  const r = game.requests[uid], i = game.pairs.findIndex(p => p.uid === r.pair), p = game.pairs[i];
+  if(!p) return "";
+  return `<div class="room-sheet-bg"><div class="room-sheet" role="dialog" aria-label="בקשת חזרה">
+    <h2>בקשה לחזור למשחק</h2>
+    <p class="room-lead2">טלפון אחר מבקש להמשיך לשחק בתור <b>${esc(pairName(p, i))}</b> (${esc(playerName(p, 0))} ו${esc(playerName(p, 1))}).
+      ${online(p.uid) ? "שימו לב: הזוג הזה מחובר כרגע מהטלפון הקודם שלו." : "הטלפון הקודם שלהם לא מחובר."}</p>
+    <button class="btn green" data-r="grant" data-u="${esc(uid)}">✓ מאשרים</button>
+    <button class="btn plain" data-r="deny" data-u="${esc(uid)}">לא לאשר</button></div></div>`;
 }
 // חלונית ההגדרות שהמארח יכול לשנות באמצע המשחק
 function liveSheet(){
@@ -774,13 +815,20 @@ function vScan(){
 // נכנסו לחדר שהמשחק בו כבר התחיל: בוחרים את הזוג שלנו מבין הזוגות שלא מחוברים
 function vReclaim(){
   if(!game) return msgScreen("📡", "מתחברים לחדר…", "", " ");
+  const req = game.requests && game.requests[me];
+  if(req && ui.reqFor){
+    const i = game.pairs.findIndex(p => p.uid === req.pair), p = game.pairs[i];
+    return `<div class="screen"><div class="scroll center" style="justify-content:center">
+      <div class="rv-hidden">⏳<b>מחכים לאישור המארח</b><small>${p ? `ביקשתם להמשיך לשחק בתור ${esc(pairName(p, i))}` : ""}</small></div></div>
+      <div class="footer"><button class="btn plain" data-r="cancelReclaim">ביטול הבקשה</button></div></div>`;
+  }
   const free = game.pairs.map((p, i) => [p, i]).filter(([p]) => p.uid !== host && !online(p.uid));
   const list = free.map(([p, i]) => `<button class="room-btn" data-r="reclaim" data-u="${esc(p.uid)}" ${ui.busy ? "disabled" : ""}><span class="ico">👥</span>
       <span><b>${esc(pairName(p, i))}</b><small>${esc(playerName(p, 0))} ו${esc(playerName(p, 1))} · ${p.score} נקודות</small></span></button>`).join("");
   return `<div class="screen"><div class="scroll">
     <h2>המשחק בחדר ${esc(code)} כבר התחיל</h2>
     ${free.length
-      ? `<p class="room-lead2">יצאתם מהמשחק? בוחרים את הזוג שלכם, והטלפון הזה ימשיך לשחק בדיוק מאותה נקודה.</p>${list}`
+      ? `<p class="room-lead2">יצאתם מהמשחק? בוחרים את הזוג שלכם, ואחרי שהמארח יאשר, הטלפון הזה ימשיך לשחק בדיוק מאותה נקודה.</p>${list}`
       : `<p class="room-lead2">אפשר לחזור רק לזוג שלא מחובר כרגע, וכל הזוגות בחדר מחוברים. אם הזוג שלכם עדיין פתוח בטלפון אחר, סוגרים שם את המשחק, וכעבור כמה שניות הוא יופיע כאן.</p>`}
     ${ui.msg ? `<div class="notice">${esc(ui.msg)}</div>` : ""}
   </div><div class="footer"><button class="btn plain" data-r="home">חזרה למסך הפתיחה</button></div></div>`;
@@ -978,7 +1026,7 @@ function view(){
 }
 function render(force){
   if(!G || !G.app) return;
-  const html = view() + liveSheet();
+  const html = view() + (requestSheet() || liveSheet());
   if(html === lastHTML && !force) return;
   // לא מוחקים טקסט שהמשתמש באמצע להקליד
   const focused = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.ri ? document.activeElement : null;
@@ -1075,6 +1123,7 @@ css.textContent = `
 .room-sheet-bg{position:fixed;inset:0;z-index:6;background:rgba(18,23,58,.55);display:flex;align-items:flex-end;justify-content:center}
 .room-sheet{width:100%;max-width:520px;box-sizing:border-box;background:var(--bg);color:var(--text);border:3px solid var(--edge);border-bottom:0;border-radius:22px 22px 0 0;padding:18px 16px calc(16px + env(safe-area-inset-bottom))}
 .room-sheet h2{margin:0 0 12px}
+.room-sheet .btn + .btn{margin-top:10px}
 .mode.rejoin .ico{background:var(--sun)}
 .room-x{flex:none;background:none;border:0;color:var(--muted);font-size:18px;padding:0 0 0 2px}
 .room-me{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%}
