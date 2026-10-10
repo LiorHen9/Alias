@@ -152,6 +152,7 @@ input[type=text]:focus{border-color:var(--edge);outline:none}
 .stage{flex:1;display:grid;place-items:center;padding:14px 22px;min-height:0}
 .card{--r:0deg;width:100%;max-width:360px;min-height:250px;background:var(--surface);border:3px solid var(--edge);border-radius:26px;box-shadow:8px 8px 0 var(--edge);padding:26px 18px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;transform:rotate(var(--r));animation:deal .26s ease-out}
 .card .emoji{font-size:120px;line-height:1.1}
+img.pic{height:1em;width:auto;vertical-align:-.12em}
 .card .kidword{font-size:38px;font-weight:700;margin-top:10px}
 .card .word{font-family:"Secular One",Rubik,Arial,sans-serif;font-size:44px;line-height:1.15;overflow-wrap:anywhere}
 @keyframes deal{from{opacity:0;transform:translateY(26px) rotate(var(--r)) scale(.94)}to{opacity:1;transform:rotate(var(--r))}}
@@ -247,6 +248,8 @@ function save(){
 function load(){ try{ const v = localStorage.getItem(KEY); return v ? JSON.parse(v) : null; }catch(e){ return null; } }
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+// תמונה לכרטיס: אימוג'י רגיל, או "pic:שם" לקובץ pics/שם.svg (כשאין אימוג'י מתאים)
+const emo = e => /^pic:[\w-]+$/.test(e||"") ? `<img class="pic" src="pics/${e.slice(4)}.svg" alt="">` : (e||"");
 const pairName = (p,i) => p.name.trim() || `זוג ${i+1}`;
 const playerName = (p,j) => p.players[j].name.trim() || (j ? "שחקן/ית ב׳" : "שחקן/ית א׳");
 const isKidPair = p => p.players.some(x => x.kid);
@@ -408,7 +411,7 @@ function vHandoff(){
 
 function cardHTML(c){
   return c.e
-    ? `<div class="card" style="--r:${c.r}deg"><div class="emoji" aria-hidden="true">${c.e}</div><div class="kidword">${esc(c.w)}</div></div>`
+    ? `<div class="card" style="--r:${c.r}deg"><div class="emoji" aria-hidden="true">${emo(c.e)}</div><div class="kidword">${esc(c.w)}</div></div>`
     : `<div class="card" style="--r:${c.r}deg"><div class="word">${esc(c.w)}</div></div>`;
 }
 function timerState(){
@@ -469,7 +472,7 @@ function vSummary(){
       <h2>סיכום התור של ${esc(pairName(p,S.turn))}</h2>
       <p style="margin:-4px 0 12px;color:var(--muted);font-size:15px">נלחץ משהו בטעות? אפשר ללחוץ על מילה כדי לתקן.</p>
       ${T.words.length ? `<ul class="words">${T.words.map((w,i) => `<li><button class="${w.ok?"":"no"}" data-a="flip" data-i="${i}" aria-pressed="${w.ok}">
-          <span class="mark">${w.ok?"✓":"✕"}</span><span class="w">${w.e?w.e+" ":""}${esc(w.w)}</span></button></li>`).join("")}</ul>`
+          <span class="mark">${w.ok?"✓":"✕"}</span><span class="w">${w.e?emo(w.e)+" ":""}${esc(w.w)}</span></button></li>`).join("")}</ul>`
         : `<p class="empty">לא נענו מילים בתור הזה</p>`}
       ${lw ? `<div class="lw-row">המילה האחרונה (${esc(T.card.w)}): +1 ל${esc(pairName(S.pairs[T.lastPair],T.lastPair))}</div>` : ""}
       <div class="total"><span>נקודות בתור:</span><b>${pts > 0 ? "+" : ""}${pts}</b></div>

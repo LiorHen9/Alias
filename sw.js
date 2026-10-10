@@ -1,8 +1,9 @@
 // Bump VERSION whenever you upload a new index.html so players get the update.
-const VERSION = "alias-v8";
+const VERSION = "alias-v9";
 const CORE = ["./", "./index.html", "./room.js", "./manifest.webmanifest",
   "./icons/icon-192.png", "./icons/icon-512.png", "./icons/apple-touch-icon.png", "./icons/favicon.png",
-  "./words/kids.txt", "./words/easy.txt", "./words/medium.txt", "./words/hard.txt"];
+  "./words/kids.txt", "./words/easy.txt", "./words/medium.txt", "./words/hard.txt",
+  "./pics/hot-air-balloon.svg"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(CORE)).then(() => self.skipWaiting()));

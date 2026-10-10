@@ -46,6 +46,8 @@ const DEV = (() => { try{ return sessionStorage.getItem("alias-roomdev") === "1"
 
 /* ---------- עזרים ---------- */
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+// תמונה לכרטיס: אימוג'י רגיל, או "pic:שם" לקובץ pics/שם.svg (כשאין אימוג'י מתאים)
+const emo = e => /^pic:[\w-]+$/.test(e || "") ? `<img class="pic" src="pics/${e.slice(4)}.svg" alt="">` : (e || "");
 const lsGet = k => { try{ return localStorage.getItem(k); }catch(e){ return null; } };
 const lsSet = (k, v) => { try{ v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); }catch(e){} };
 const arr = x => Array.isArray(x) ? x.filter(v => v != null) : x && typeof x === "object" ? Object.keys(x).sort((a, b) => a - b).map(k => x[k]).filter(v => v != null) : [];
@@ -202,7 +204,7 @@ function drawCard(){
 function cardHTML(c, still){
   const s = still ? " still" : "";
   return c.e
-    ? `<div class="card${s}" style="--r:${c.r || 0}deg"><div class="emoji" aria-hidden="true">${c.e}</div><div class="kidword">${esc(c.w)}</div></div>`
+    ? `<div class="card${s}" style="--r:${c.r || 0}deg"><div class="emoji" aria-hidden="true">${emo(c.e)}</div><div class="kidword">${esc(c.w)}</div></div>`
     : `<div class="card${s}" style="--r:${c.r || 0}deg"><div class="word">${esc(c.w)}</div></div>`;
 }
 
@@ -934,8 +936,8 @@ function wordList(words, flip){
   if(!words.length) return `<p class="empty">לא נענו מילים בתור הזה</p>`;
   return flip
     ? `<ul class="words">${words.map((w, i) => `<li><button class="${w.ok ? "" : "no"}" data-r="flip" data-i="${i}" aria-pressed="${!!w.ok}">
-        <span class="mark">${w.ok ? "✓" : "✕"}</span><span class="w">${w.e ? w.e + " " : ""}${esc(w.w)}</span></button></li>`).join("")}</ul>`
-    : `<ul class="rv-words">${words.map(w => `<li class="${w.ok ? "" : "no"}"><span class="mark">${w.ok ? "✓" : "✕"}</span><span>${w.e ? w.e + " " : ""}${esc(w.w)}</span></li>`).join("")}</ul>`;
+        <span class="mark">${w.ok ? "✓" : "✕"}</span><span class="w">${w.e ? emo(w.e) + " " : ""}${esc(w.w)}</span></button></li>`).join("")}</ul>`
+    : `<ul class="rv-words">${words.map(w => `<li class="${w.ok ? "" : "no"}"><span class="mark">${w.ok ? "✓" : "✕"}</span><span>${w.e ? emo(w.e) + " " : ""}${esc(w.w)}</span></li>`).join("")}</ul>`;
 }
 function vTurnOther(){
   const i = game.turn, p = game.pairs[i], t = turnLive && turnLive.tid === game.tid ? turnLive : null;
@@ -967,7 +969,7 @@ function vLastWord(){
 function reviewBlock(flip){
   const r = game.review, pts = ptsOf(r.words.map(w => ({ok: !!w.ok})), game.settings);
   return `${wordList(r.words, flip)}
-    ${r.lastPair >= 0 && game.pairs[r.lastPair] ? `<div class="lw-row">המילה האחרונה (${r.card.e ? r.card.e + " " : ""}${esc(r.card.w)}): +1 ל${esc(pairName(game.pairs[r.lastPair], r.lastPair))}</div>` : ""}
+    ${r.lastPair >= 0 && game.pairs[r.lastPair] ? `<div class="lw-row">המילה האחרונה (${r.card.e ? emo(r.card.e) + " " : ""}${esc(r.card.w)}): +1 ל${esc(pairName(game.pairs[r.lastPair], r.lastPair))}</div>` : ""}
     <div class="total"><span>נקודות בתור:</span><b>${pts > 0 ? "+" : ""}${pts}</b></div>`;
 }
 function vSummary(){
