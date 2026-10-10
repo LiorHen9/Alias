@@ -1,0 +1,82 @@
+name: Old address notice (GitHub Pages)
+
+# The game moved to Firebase Hosting (https://alias-liorhen9.web.app). The old address,
+# https://liorhen9.github.io/Alias/, then shows only a notice with the new link (legacy-pages/).
+# Nothing to back up: the phone keeps only the current game.
+#
+# room.js stays at the old address too: 18Alias loads it from there (../Alias/room.js) until
+# 18Alias moves as well. That is why a change to room.js publishes this again.
+#
+# Safe to run at any time: it publishes only once the new address really serves Alias, so the old
+# game stays where it is until the move worked. Until then the run ends green with a note.
+# It stops working by itself once the repository is private.
+on:
+  workflow_run:
+    workflows: [Deploy to Firebase Hosting]
+    types: [completed]
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - 'legacy-pages/**'
+      - 'room.js'
+      - '.github/workflows/legacy-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  NEW_URL: https://alias-liorhen9.web.app/
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    outputs:
+      ready: ${{ steps.probe.outputs.ready }}
+    steps:
+      - id: probe
+        name: Is the new address up?
+        run: |
+          if curl -fsSL --max-time 30 "$NEW_URL" | grep -q 'AliasRoom'; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$NEW_URL does not serve Alias yet – the old address keeps the game for now."
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Put the page together
+        run: |
+          mkdir -p site
+          cp -r legacy-pages/. site/
+          cp -r icons site/
+          cp room.js site/
+          ls -R site
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

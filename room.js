@@ -541,9 +541,10 @@ function scanned(txt){
   let c = "", url = null;
   try{ url = new URL(txt); }catch(e){}
   if(url){
-    if(url.origin === location.origin && url.searchParams.get("room")){
-      // QR של חדר במשחק השני (Alias ↔ 18Alias): אסור להצטרף מכאן
-      if(url.pathname.replace(/index\.html$/, "").toLowerCase() !== location.pathname.replace(/index\.html$/, "").toLowerCase()){
+    if(url.searchParams.get("room")){
+      // QR של חדר במשחק השני (Alias ↔ 18Alias): אסור להצטרף מכאן.
+      // המשחקים יושבים בכתובות שונות (Firebase / GitHub Pages), ולכן מזהים לפי השם שבכתובת
+      if((/18alias|alias18/i.test(url.host + url.pathname) ? "alias18" : "alias") !== G.game){
         const m = document.getElementById("room-scan-msg");
         if(m) m.textContent = otherGameMsg();
         return false;

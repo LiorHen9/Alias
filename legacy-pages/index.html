@@ -1,0 +1,107 @@
+<!doctype html>
+<!--
+  The page at the OLD address (https://liorhen9.github.io/Alias/), published by
+  .github/workflows/legacy-pages.yml. It replaces the game there (as ChessIt's and MathIt's legacy-pages/ did).
+  Unlike them there is nothing to back up: the phone keeps only the current game (alias-game-v1).
+  A room link (?room=CODE) is passed on to the new address: the rooms live in the same Firebase project.
+-->
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#1B2250">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="אליאס">
+<title>אליאס עבר לכתובת חדשה</title>
+<link rel="icon" type="image/png" href="icons/favicon.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+:root{
+  --bg:#EAF0FF; --surface:#FFFFFF; --text:#1B2250; --muted:#5A6290; --soft:#D3DCFA;
+  --edge:#1B2250; --sun:#FFC93C; --btn:#1B2250; --btn-ink:#FFFFFF;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#12173A; --surface:#1E2656; --text:#F3F5FF; --muted:#AEB6E0; --soft:#303A7A;
+    --edge:#FFC93C; --btn:#FFC93C; --btn-ink:#1B2250; }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);
+  font-family:Rubik,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;font-size:17px;line-height:1.5}
+main{max-width:520px;margin:0 auto;
+  padding:max(20px,env(safe-area-inset-top)) 16px max(32px,env(safe-area-inset-bottom))}
+.hero{text-align:center;padding:8px 0 4px}
+.hero img{width:76px;height:76px;border-radius:18px}
+h1{font-size:1.6rem;line-height:1.25;margin:12px 0 6px}
+.lead{color:var(--muted);margin:0 0 18px}
+.card{background:var(--surface);border:2px solid var(--edge);border-radius:18px;padding:16px;margin:14px 0}
+h2{font-size:1.1rem;margin:0 0 10px;display:flex;gap:8px;align-items:center}
+.num{flex:none;width:28px;height:28px;border-radius:50%;background:var(--sun);color:#1B2250;
+  display:inline-grid;place-items:center;font-size:.95rem}
+p{margin:0 0 10px}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:54px;
+  padding:12px 16px;border-radius:16px;background:var(--btn);color:var(--btn-ink);
+  font:inherit;font-weight:700;text-decoration:none;margin-top:8px}
+.url{direction:ltr;unicode-bidi:isolate;word-break:break-all;font-size:.95rem;color:var(--muted);text-align:center}
+ul,ol{margin:0;padding-inline-start:1.3em}
+li{margin-bottom:6px}
+.ltr{direction:ltr;unicode-bidi:isolate;white-space:nowrap}
+.muted{color:var(--muted);font-size:.93rem}
+footer{text-align:center;color:var(--muted);font-size:.85rem;margin-top:22px}
+</style>
+</head>
+<body>
+<main>
+  <div class="hero">
+    <img src="icons/icon-192.png" alt="" width="76" height="76">
+    <h1>אליאס עבר לכתובת חדשה</h1>
+    <p class="lead">הכתובת הזו כבר לא בשימוש, והמשחק לא מתעדכן כאן יותר. ממשיכים לשחק בכתובת החדשה.</p>
+  </div>
+
+  <section class="card" aria-labelledby="h-new">
+    <h2 id="h-new"><span class="num" aria-hidden="true">1</span>פותחים את הכתובת החדשה</h2>
+    <a class="btn" id="go" href="https://alias-liorhen9.web.app/">🎉 פתיחת אליאס</a>
+    <p class="url" style="margin-top:10px">https://alias-liorhen9.web.app/</p>
+    <p class="muted" id="room-note" hidden>הגעתם מלינק של חדר: הכפתור מעביר אתכם לאותו חדר בכתובת החדשה.</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-install">
+    <h2 id="h-install"><span class="num" aria-hidden="true">2</span>מתקינים אותה במסך הבית</h2>
+    <ul>
+      <li><b>אייפון:</b> בספארי, כפתור השיתוף ⬆️ ואז "הוספה למסך הבית".</li>
+      <li><b>אנדרואיד:</b> בכרום, <span class="ltr">⋮</span> ואז "התקנת האפליקציה" (או הכפתור "התקנה במסך הבית" במשחק).</li>
+    </ul>
+    <p class="muted" style="margin-top:10px">אחר כך מוחקים את האייקון הישן ממסך הבית.</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-what">
+    <h2 id="h-what"><span class="num" aria-hidden="true">3</span>מה עובר ומה לא</h2>
+    <p>זה אותו משחק בדיוק, עם אותן מילים ואותו משחק בחדר. משחק שהיה באמצע בכתובת הישנה לא עובר: בכתובת החדשה מתחילים משחק חדש ומקלידים שוב את שמות הזוגות.</p>
+  </section>
+
+  <footer>אליאס: משחק למשפחה ולחברים</footer>
+</main>
+<script>
+(function(){
+  "use strict";
+  // A room link from the old address goes on to the same room at the new one.
+  var room = new URLSearchParams(location.search).get("room");
+  if(room){
+    var go = document.getElementById("go");
+    go.href = "https://alias-liorhen9.web.app/?room=" + encodeURIComponent(room);
+    document.getElementById("room-note").hidden = false;
+  }
+  // Old installs still run the game's Service Worker. sw.js here replaces it with one that clears
+  // the game's caches and goes away; this makes sure the update is checked right now.
+  // Only the registration of this address (/Alias/), not 18Alias's or other apps' on the same domain.
+  if("serviceWorker" in navigator && navigator.serviceWorker.getRegistrations){
+    navigator.serviceWorker.getRegistrations().then(function(regs){
+      regs.forEach(function(r){ if(/\/Alias\/$/.test(r.scope)) r.update().catch(function(){}); });
+    }).catch(function(){});
+  }
+})();
+</script>
+</body>
+</html>

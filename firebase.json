@@ -1,0 +1,27 @@
+{
+  "hosting": {
+    "site": "alias-liorhen9",
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      "README.md",
+      "database.rules.json",
+      "legacy-pages/**"
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(html|js|webmanifest|txt)",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      },
+      {
+        "source": "/",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      }
+    ]
+  },
+  "database": {
+    "rules": "database.rules.json"
+  }
+}

@@ -1,0 +1,47 @@
+name: Deploy to Firebase Hosting
+
+# Every push to main publishes the site to https://alias-liorhen9.web.app
+# (Hosting site alias-liorhen9 in the Firebase project alias-7214e, the same project the rooms use).
+# There is no build: the files in the repo are the site (firebase.json says which ones).
+# Needs the FIREBASE_SERVICE_ACCOUNT secret with the "Firebase Hosting Admin" role (README, "פרסום ב-Firebase Hosting").
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+env:
+  FIREBASE_PROJECT: alias-7214e
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check the deploy key
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::Missing the FIREBASE_SERVICE_ACCOUNT secret – see README, \"פרסום ב-Firebase Hosting\""
+            exit 1
+          fi
+          # A key from another Firebase project (ChessIt's, say) would publish to the wrong place.
+          key_project=$(printf '%s' "$FIREBASE_SERVICE_ACCOUNT" | jq -r '.project_id // empty' 2>/dev/null || true)
+          if [ "$key_project" != "$FIREBASE_PROJECT" ]; then
+            echo "::error::The FIREBASE_SERVICE_ACCOUNT key is for project '${key_project:-?}', not '$FIREBASE_PROJECT'"
+            exit 1
+          fi
+
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: ${{ env.FIREBASE_PROJECT }}
+          channelId: live
